@@ -67,6 +67,7 @@
       <file file_name="../../../../../../components/libraries/sortlist/nrf_sortlist.c" />
       <file file_name="../../../../../../components/libraries/strerror/nrf_strerror.c" />
       <file file_name="../../../../../../components/libraries/uart/retarget.c" />
+      <file file_name="../../../../../../components/libraries/fstorage/nrf_fstorage.c" />
     </folder>
     <folder Name="None">
       <file file_name="../../../../../../modules/nrfx/mdk/ses_startup_nrf52.s" />

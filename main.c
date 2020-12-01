@@ -62,6 +62,7 @@
 #include "nrf_ble_gatt.h"
 #include "nrf_ble_qwr.h"
 #include "nrf_ble_scan.h" // added 
+#include "nrf_fstorage.h" //added
 #include "app_timer.h"
 #include "ble_nus.h"
 //#include "ble_nus_c.h" //!
@@ -94,6 +95,10 @@
 
 #define APP_ADV_DURATION                BLE_GAP_ADV_TIMEOUT_GENERAL_UNLIMITED       /**< Disable advertising timeout. */
 
+#define SCAN_INTERVAL                   0x00A0                              /**< Determines scan interval in units of 0.625 millisecond. */
+#define SCAN_WINDOW                     0x0050                              /**< Determines scan window in units of 0.625 millisecond. */
+#define SCAN_DURATION                   0x0000                              /**< Timout when scanning. 0x0000 disables timeout. */
+
 #define MIN_CONN_INTERVAL               MSEC_TO_UNITS(150,  UNIT_1_25_MS)           /**< Minimum acceptable connection interval. */
 #define MAX_CONN_INTERVAL               MSEC_TO_UNITS(250,  UNIT_1_25_MS)           /**< Maximum acceptable connection interval. */
 #define SLAVE_LATENCY                   0                                           /**< Slave latency. */
@@ -112,6 +117,14 @@ BLE_NUS_DEF(m_nus, NRF_SDH_BLE_TOTAL_LINK_COUNT);                               
 NRF_BLE_GATT_DEF(m_gatt);                                                           /**< GATT module instance. */
 NRF_BLE_QWR_DEF(m_qwr);                                                             /**< Context for the Queued Write module.*/
 BLE_ADVERTISING_DEF(m_advertising);                                                 /**< Advertising module instance. */
+NRF_BLE_SCAN_DEF(m_scan);                                       /**< Scanning module instance. */
+
+
+// Команды замера пульса и давления
+static uint8_t wr4119_cmd_pulse_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x01 }; 
+static uint8_t wr4119_cmd_pulse_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x00 };
+static uint8_t wr4119_cmd_pressure_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x01 };
+static uint8_t wr4119_cmd_pressure_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x00 };
 
 static uint16_t   m_conn_handle          = BLE_CONN_HANDLE_INVALID;                 /**< Handle of the current connection. */
 static uint16_t   m_ble_nus_max_data_len = BLE_GATT_ATT_MTU_DEFAULT - 3;            /**< Maximum length of data (in bytes) that can be transmitted to the peer by the Nordic UART service module. */
@@ -120,6 +133,18 @@ static ble_uuid_t m_adv_uuids[]          =                                      
     {BLE_UUID_NUS_SERVICE, NUS_SERVICE_UUID_TYPE}
 };
 
+/**< Scan parameters requested for scanning and connection. */
+static ble_gap_scan_params_t m_scan_param =
+{
+        .active        = 0x00,           /* Disable the acvtive scanning */
+        .interval      = NRF_BLE_SCAN_SCAN_INTERVAL,
+        .window        = NRF_BLE_SCAN_SCAN_WINDOW,
+        .filter_policy = BLE_GAP_SCAN_FP_ACCEPT_ALL, //BLE_GAP_SCAN_FP_WHITELIST
+        .timeout       = 0, //SCAN_DURATION_WHITELIST
+        .scan_phys     = BLE_GAP_PHY_1MBPS,
+};
+
+static bool m_memory_access_in_progress;
 
 /**@brief Function for assert macro callback.
  *
@@ -143,6 +168,22 @@ static void timers_init(void)
 {
     ret_code_t err_code = app_timer_init();
     APP_ERROR_CHECK(err_code);
+}
+
+/**@brief Function to start scanning.
+ */
+static void scan_start(void)
+{
+    ret_code_t err_code;
+    // If there is any pending write to flash, defer scanning until it completes.
+    if (nrf_fstorage_is_busy(NULL))
+    {
+        m_memory_access_in_progress = true;
+        return;
+    }
+    err_code = nrf_ble_scan_start(&m_scan);
+    APP_ERROR_CHECK(err_code);
+    NRF_LOG_INFO("Scan start");
 }
 
 /**@brief Function for the GAP initialization.
@@ -420,6 +461,13 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                                              BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
             APP_ERROR_CHECK(err_code);
             break;
+        
+        case BLE_GAP_EVT_ADV_REPORT:
+        {
+            NRF_LOG_RAW_HEXDUMP_INFO (m_scan.scan_buffer.p_data, m_scan.scan_buffer.len);
+            //NRF_LOG_RAW_INFO ("RSSI: %d\r\n", p_ble_evt->params.adv_report.rssi); // TODO: fix rssi report
+            NRF_LOG_RAW_INFO ("\r\n");
+        } break;
 
         default:
             // No implementation needed.
@@ -427,6 +475,32 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
     }
 }
 
+/**
+ * @brief SoftDevice SoC event handler.
+ *
+ * @param[in] evt_id    SoC event.
+ * @param[in] p_context Context.
+ */
+static void soc_evt_handler(uint32_t evt_id, void * p_context)
+{
+    switch (evt_id)
+    {
+        case NRF_EVT_FLASH_OPERATION_SUCCESS:
+        /* fall through */
+        case NRF_EVT_FLASH_OPERATION_ERROR:
+
+            if (m_memory_access_in_progress)
+            {
+                m_memory_access_in_progress = false;
+                scan_start();
+            }
+            break;
+
+        default:
+            // No implementation needed.
+            break;
+    }
+}
 
 /**@brief Function for the SoftDevice initialization.
  *
@@ -453,6 +527,44 @@ static void ble_stack_init(void)
     NRF_SDH_BLE_OBSERVER(m_ble_observer, APP_BLE_OBSERVER_PRIO, ble_evt_handler, NULL);
 }
 
+/**@brief Function for handling Scaning events.
+ *
+ * @param[in]   p_scan_evt   Scanning event.
+ */
+static void scan_evt_handler(scan_evt_t const * p_scan_evt)
+{
+    ret_code_t err_code;
+
+    switch(p_scan_evt->scan_evt_id)
+    {
+        case NRF_BLE_SCAN_EVT_CONNECTING_ERROR:
+        {
+            err_code = p_scan_evt->params.connecting_err.err_code;
+            APP_ERROR_CHECK(err_code);
+        } break;
+        
+        /*case NRF_BLE_SCAN_EVT_WHITELIST_REQUEST:
+        {
+            //on_whitelist_req();
+            //m_whitelist_disabled = false;
+        } break;*/
+        
+        case NRF_BLE_SCAN_EVT_WHITELIST_ADV_REPORT:
+        {
+            NRF_LOG_INFO("NRF_BLE_SCAN_EVT_WHITELIST_ADV_REPORT");
+            NRF_LOG_HEXDUMP_INFO(p_scan_evt->params.p_whitelist_adv_report, sizeof(p_scan_evt->params.p_whitelist_adv_report));
+        } break;
+
+        case NRF_BLE_SCAN_EVT_SCAN_TIMEOUT:
+        {
+            NRF_LOG_INFO("Scan timed out.");
+            scan_start();
+        } break;
+
+        default:
+          break;
+    }
+}
 
 /**@brief Function for handling events from the GATT library. */
 void gatt_evt_handler(nrf_ble_gatt_t * p_gatt, nrf_ble_gatt_evt_t const * p_evt)
@@ -660,6 +772,23 @@ static void power_management_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
+/**@brief Инициализация сканирования устройств. */
+static void scan_init(void)
+{
+    ret_code_t          err_code;
+    nrf_ble_scan_init_t init_scan;
+
+    memset(&init_scan, 0, sizeof(init_scan));
+
+    init_scan.connect_if_match = false;
+    init_scan.conn_cfg_tag     = APP_BLE_CONN_CFG_TAG;
+    init_scan.p_scan_param     = &m_scan_param;
+
+    err_code = nrf_ble_scan_init(&m_scan, &init_scan, scan_evt_handler);
+    APP_ERROR_CHECK(err_code);
+    
+    //m_whitelist_disabled = false;
+}
 
 /**@brief Function for handling the idle state (main loop).
  *
@@ -698,12 +827,16 @@ int main(void)
     gatt_init();
     services_init();
     advertising_init();
+    scan_init();
     conn_params_init();
     mesh_main_initialize();
 
     // Start execution.
     NRF_LOG_INFO("Debug logging for UART over RTT started.");
+    NRF_LOG_FLUSH();
+
     advertising_start();
+    scan_start();
     mesh_main_start();
 
     // Enter main loop.
