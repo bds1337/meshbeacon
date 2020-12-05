@@ -63,26 +63,22 @@
 #include "nrf_ble_qwr.h"
 #include "nrf_ble_scan.h" // added 
 #include "nrf_fstorage.h" //added
+#include "ble_db_discovery.h" //added
 #include "app_timer.h"
-#include "ble_nus.h"
-//#include "ble_nus_c.h" //!
-#include "app_uart.h"
+//#include "ble_nus.h"
+#include "ble_nus_c.h" //!
+//#include "app_uart.h"
 #include "app_util_platform.h"
 #include "bsp_btn_ble.h"
 #include "nrf_pwr_mgmt.h"
 #include "mesh_main.h"
 #include "mesh_app_utils.h"
 
-#if defined (UART_PRESENT)
-#include "nrf_uart.h"
-#endif
-#if defined (UARTE_PRESENT)
-#include "nrf_uarte.h"
-#endif
-
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
+
+#include "app_whitelist.h" //added
 
 #define APP_BLE_CONN_CFG_TAG            1                                           /**< A tag identifying the SoftDevice BLE configuration. */
 
@@ -90,10 +86,6 @@
 #define NUS_SERVICE_UUID_TYPE           BLE_UUID_TYPE_VENDOR_BEGIN                  /**< UUID type for the Nordic UART Service (vendor specific). */
 
 #define APP_BLE_OBSERVER_PRIO           3                                           /**< Application's BLE observer priority. You shouldn't need to modify this value. */
-
-#define APP_ADV_INTERVAL                800                                         /**< The advertising interval (in units of 0.625 ms. This value corresponds to 500 ms). */
-
-#define APP_ADV_DURATION                BLE_GAP_ADV_TIMEOUT_GENERAL_UNLIMITED       /**< Disable advertising timeout. */
 
 #define SCAN_INTERVAL                   0x00A0                              /**< Determines scan interval in units of 0.625 millisecond. */
 #define SCAN_WINDOW                     0x0050                              /**< Determines scan window in units of 0.625 millisecond. */
@@ -113,11 +105,14 @@
 #define UART_RX_BUF_SIZE                256                                         /**< UART RX buffer size. */
 
 
-BLE_NUS_DEF(m_nus, NRF_SDH_BLE_TOTAL_LINK_COUNT);                                   /**< BLE NUS service instance. */
+//BLE_NUS_DEF(m_nus, NRF_SDH_BLE_TOTAL_LINK_COUNT);                                   /**< BLE NUS service instance. */
+BLE_NUS_C_ARRAY_DEF(m_ble_nus_c, NRF_SDH_BLE_CENTRAL_LINK_COUNT); 
+BLE_DB_DISCOVERY_ARRAY_DEF(m_db_disc, NRF_SDH_BLE_CENTRAL_LINK_COUNT);  /**< Database discovery module instances. */
 NRF_BLE_GATT_DEF(m_gatt);                                                           /**< GATT module instance. */
 NRF_BLE_QWR_DEF(m_qwr);                                                             /**< Context for the Queued Write module.*/
-BLE_ADVERTISING_DEF(m_advertising);                                                 /**< Advertising module instance. */
 NRF_BLE_SCAN_DEF(m_scan);                                       /**< Scanning module instance. */
+
+static bool m_whitelist_disabled;          /**< True if the whitelist is temporarily disabled. */
 
 
 // Команды замера пульса и давления
@@ -230,17 +225,46 @@ static void nrf_qwr_error_handler(uint32_t nrf_error)
 
 
 /**@brief Function for handling the data from the Nordic UART Service.
- *
- * @details This function will process the data received from the Nordic UART BLE Service and send
- *          it to the UART module.
- *
- * @param[in] p_evt       Nordic UART Service event.
  */
-/**@snippet [Handling the data received over BLE] */
-static void nus_data_handler(ble_nus_evt_t * p_evt)
+//static void nus_data_handler(ble_nus_c_evt_t * p_ble_nus_evt)
+static void nus_data_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t * p_ble_nus_evt)
 {
+    ret_code_t err_code;
 
-    if (p_evt->type == BLE_NUS_EVT_RX_DATA)
+    switch (p_ble_nus_evt->evt_type)
+    {
+        case BLE_NUS_C_EVT_DISCOVERY_COMPLETE:
+        {
+            NRF_LOG_INFO("Discovery complete.on conn_handle 0x%x",
+                         p_ble_nus_evt->conn_handle);
+
+            err_code = ble_nus_c_handles_assign(p_ble_nus_c, p_ble_nus_evt->conn_handle, &p_ble_nus_evt->handles);
+            APP_ERROR_CHECK(err_code);
+
+            err_code = ble_nus_c_tx_notif_enable(p_ble_nus_c);
+            APP_ERROR_CHECK(err_code);
+
+            NRF_LOG_INFO("Connected to device with Nordic UART Service.");
+            
+            //ble_nus_wr4119_start_measure(); // замерить давление и пульс
+         } break;
+
+        case BLE_NUS_C_EVT_NUS_TX_EVT:
+        {
+            NRF_LOG_INFO("notification from conn handle 0x%04x", p_ble_nus_evt->conn_handle);
+            //ble_nus_chars_received_uart_print(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
+        } break;
+
+        //case BLE_NUS_C_EVT_DISCONNECTED:
+        //    NRF_LOG_INFO("Disconnected.");
+        //    scan_start();
+        //    break;
+
+       default:
+            break;
+    }
+    // old NUS stuff
+    /*if (p_evt->type == BLE_NUS_EVT_RX_DATA)
     {
         uint32_t err_code;
 
@@ -268,7 +292,7 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
         {
             mesh_main_button_event_handler(p_evt->params.rx_data.p_data[0] - '1');
         }
-    }
+    }*/
 
 }
 /**@snippet [Handling the data received over BLE] */
@@ -279,7 +303,7 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
 static void services_init(void)
 {
     uint32_t           err_code;
-    ble_nus_init_t     nus_init;
+    ble_nus_c_init_t     nus_init;
     nrf_ble_qwr_init_t qwr_init = {0};
 
     // Initialize Queued Write Module.
@@ -291,10 +315,14 @@ static void services_init(void)
     // Initialize NUS.
     memset(&nus_init, 0, sizeof(nus_init));
 
-    nus_init.data_handler = nus_data_handler;
+    //nus_init.data_handler = nus_data_handler;
+    nus_init.evt_handler = nus_data_handler;
 
-    err_code = ble_nus_init(&m_nus, &nus_init);
-    APP_ERROR_CHECK(err_code);
+    for (uint32_t i = 0; i < NRF_SDH_BLE_CENTRAL_LINK_COUNT; i++)
+    {
+        err_code = ble_nus_c_init(&m_ble_nus_c[i], &nus_init);
+        APP_ERROR_CHECK(err_code);
+    }
 }
 
 
@@ -370,31 +398,6 @@ static void sleep_mode_enter(void)
     // Go to system-off mode (this function will not return; wakeup will cause a reset).
     err_code = sd_power_system_off();
     APP_ERROR_CHECK(err_code);
-}
-
-
-/**@brief Function for handling advertising events.
- *
- * @details This function will be called for advertising events which are passed to the application.
- *
- * @param[in] ble_adv_evt  Advertising event.
- */
-static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
-{
-    uint32_t err_code;
-
-    switch (ble_adv_evt)
-    {
-        case BLE_ADV_EVT_FAST:
-            err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING);
-            APP_ERROR_CHECK(err_code);
-            break;
-        case BLE_ADV_EVT_IDLE:
-            sleep_mode_enter();
-            break;
-        default:
-            break;
-    }
 }
 
 
@@ -527,6 +530,35 @@ static void ble_stack_init(void)
     NRF_SDH_BLE_OBSERVER(m_ble_observer, APP_BLE_OBSERVER_PRIO, ble_evt_handler, NULL);
 }
 
+static void on_whitelist_req(void)
+{
+    ret_code_t ret;
+    if ( ( (wr_ble_app_whitelist_count() == 0) ) || (m_whitelist_disabled) )
+    {
+        m_scan_param.filter_policy = BLE_GAP_SCAN_FP_ACCEPT_ALL;
+        ret = nrf_ble_scan_params_set(&m_scan, &m_scan_param);
+        APP_ERROR_CHECK(ret);
+    }
+    else
+    {
+        ret = wr_ble_app_whitelist_enable();
+        APP_ERROR_CHECK(ret);
+    }
+}
+
+/**@brief Function for disabling the use of the whitelist for scanning.
+ */
+static void whitelist_disable(void)
+{
+    if (!m_whitelist_disabled)
+    {
+        NRF_LOG_INFO("Whitelist temporarily disabled.");
+        m_whitelist_disabled = true;
+        nrf_ble_scan_stop();
+        scan_start();
+    }
+}
+
 /**@brief Function for handling Scaning events.
  *
  * @param[in]   p_scan_evt   Scanning event.
@@ -543,11 +575,11 @@ static void scan_evt_handler(scan_evt_t const * p_scan_evt)
             APP_ERROR_CHECK(err_code);
         } break;
         
-        /*case NRF_BLE_SCAN_EVT_WHITELIST_REQUEST:
+        case NRF_BLE_SCAN_EVT_WHITELIST_REQUEST:
         {
-            //on_whitelist_req();
-            //m_whitelist_disabled = false;
-        } break;*/
+            on_whitelist_req();
+            m_whitelist_disabled = false;
+        } break;
         
         case NRF_BLE_SCAN_EVT_WHITELIST_ADV_REPORT:
         {
@@ -614,126 +646,6 @@ void bsp_event_handler(bsp_event_t event)
 }
 
 
-/**@brief   Function for handling app_uart events.
- *
- * @details This function will receive a single character from the app_uart module and append it to
- *          a string. The string will be be sent over BLE when the last character received was a
- *          'new line' '\n' (hex 0x0A) or if the string has reached the maximum data length.
- */
-/**@snippet [Handling the data received over UART] */
-void uart_event_handle(app_uart_evt_t * p_event)
-{
-    static uint8_t data_array[BLE_NUS_MAX_DATA_LEN];
-    static uint8_t index = 0;
-    uint32_t       err_code;
-
-    switch (p_event->evt_type)
-    {
-        case APP_UART_DATA_READY:
-            UNUSED_VARIABLE(app_uart_get(&data_array[index]));
-            index++;
-
-            if ((data_array[index - 1] == '\n') ||
-                (data_array[index - 1] == '\r') ||
-                (index >= m_ble_nus_max_data_len))
-            {
-                if (index > 1)
-            {
-                NRF_LOG_DEBUG("Ready to send data over BLE NUS");
-                NRF_LOG_HEXDUMP_DEBUG(data_array, index);
-
-                do
-                {
-                    uint16_t length = (uint16_t)index;
-                    err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
-                        if ((err_code != NRF_ERROR_INVALID_STATE) &&
-                            (err_code != NRF_ERROR_RESOURCES) &&
-                         (err_code != NRF_ERROR_NOT_FOUND) )
-                    {
-                        APP_ERROR_CHECK(err_code);
-                    }
-                    } while (err_code == NRF_ERROR_RESOURCES);
-                }
-
-                index = 0;
-            }
-            break;
-
-        case APP_UART_COMMUNICATION_ERROR:
-            APP_ERROR_HANDLER(p_event->data.error_communication);
-            break;
-
-        case APP_UART_FIFO_ERROR:
-            APP_ERROR_HANDLER(p_event->data.error_code);
-            break;
-
-        default:
-            break;
-    }
-}
-/**@snippet [Handling the data received over UART] */
-
-
-/**@brief  Function for initializing the UART module.
- */
-/**@snippet [UART Initialization] */
-static void uart_init(void)
-{
-    uint32_t                     err_code;
-    app_uart_comm_params_t const comm_params =
-    {
-        .rx_pin_no    = RX_PIN_NUMBER,
-        .tx_pin_no    = TX_PIN_NUMBER,
-        .rts_pin_no   = RTS_PIN_NUMBER,
-        .cts_pin_no   = CTS_PIN_NUMBER,
-        .flow_control = APP_UART_FLOW_CONTROL_DISABLED,
-        .use_parity   = false,
-#if defined (UART_PRESENT)
-        .baud_rate    = NRF_UART_BAUDRATE_115200
-#else
-        .baud_rate    = NRF_UARTE_BAUDRATE_115200
-#endif
-    };
-
-    APP_UART_FIFO_INIT(&comm_params,
-                       UART_RX_BUF_SIZE,
-                       UART_TX_BUF_SIZE,
-                       uart_event_handle,
-                       APP_IRQ_PRIORITY_LOWEST,
-                       err_code);
-    APP_ERROR_CHECK(err_code);
-}
-/**@snippet [UART Initialization] */
-
-
-/**@brief Function for initializing the Advertising functionality.
- */
-static void advertising_init(void)
-{
-    uint32_t               err_code;
-    ble_advertising_init_t init;
-
-    memset(&init, 0, sizeof(init));
-
-    init.advdata.name_type          = BLE_ADVDATA_FULL_NAME;
-    init.advdata.include_appearance = false;
-    init.advdata.flags              = BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE;
-
-    init.srdata.uuids_complete.uuid_cnt = sizeof(m_adv_uuids) / sizeof(m_adv_uuids[0]);
-    init.srdata.uuids_complete.p_uuids  = m_adv_uuids;
-
-    init.config.ble_adv_fast_enabled  = true;
-    init.config.ble_adv_fast_interval = APP_ADV_INTERVAL;
-    init.config.ble_adv_fast_timeout  = APP_ADV_DURATION;
-    init.evt_handler = on_adv_evt;
-
-    err_code = ble_advertising_init(&m_advertising, &init);
-    APP_ERROR_CHECK(err_code);
-
-    ble_advertising_conn_cfg_tag_set(&m_advertising, APP_BLE_CONN_CFG_TAG);
-}
-
-
 /**@brief Function for initializing buttons and leds.
  *
  * @param[out] p_erase_bonds  Will be true if the clear bonding button was pressed to wake the application up.
@@ -772,22 +684,24 @@ static void power_management_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
-/**@brief Инициализация сканирования устройств. */
-static void scan_init(void)
+/**@brief Инициализация сканирования устройств. 
+ * is_conn - true = подкл. к устройствам из whitelist
+ */
+static void scan_init(bool is_conn)
 {
     ret_code_t          err_code;
     nrf_ble_scan_init_t init_scan;
 
     memset(&init_scan, 0, sizeof(init_scan));
 
-    init_scan.connect_if_match = false;
+    init_scan.connect_if_match = is_conn;
     init_scan.conn_cfg_tag     = APP_BLE_CONN_CFG_TAG;
     init_scan.p_scan_param     = &m_scan_param;
 
     err_code = nrf_ble_scan_init(&m_scan, &init_scan, scan_evt_handler);
     APP_ERROR_CHECK(err_code);
     
-    //m_whitelist_disabled = false;
+    m_whitelist_disabled = false;
 }
 
 /**@brief Function for handling the idle state (main loop).
@@ -800,15 +714,23 @@ static void idle_state_handle(void)
     nrf_pwr_mgmt_run();
 }
 
-
-/**@brief Function for starting advertising.
- */
-static void advertising_start(void)
+static void TEST_set_whitelist_wr41()
 {
-    uint32_t err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
-    APP_ERROR_CHECK(err_code);
+    ret_code_t ret;
+    ble_gap_addr_t whitelist_addrs;
+    uint8_t whitelist_num = 0;
+    whitelist_addrs.addr_type = BLE_GAP_ADDR_TYPE_RANDOM_STATIC;
+    //{0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF}
+    whitelist_addrs.addr[5] = 0xef;
+    whitelist_addrs.addr[4] = 0xcc;
+    whitelist_addrs.addr[3] = 0x8f;
+    whitelist_addrs.addr[2] = 0xf8;
+    whitelist_addrs.addr[1] = 0x87;
+    whitelist_addrs.addr[0] = 0x50;
+    ret = wr_ble_app_whitelist_add(&whitelist_addrs, &whitelist_num);
+    NRF_LOG_INFO("addlist num: %u", whitelist_num);
+    APP_ERROR_CHECK(ret);
 }
-
 
 /**@brief Application main function.
  */
@@ -817,7 +739,6 @@ int main(void)
     bool erase_bonds;
 
     // Initialize.
-    uart_init();
     log_init();
     timers_init();
     buttons_leds_init(&erase_bonds);
@@ -826,16 +747,26 @@ int main(void)
     gap_params_init();
     gatt_init();
     services_init();
-    advertising_init();
-    scan_init();
+    scan_init(true); // 
     conn_params_init();
     mesh_main_initialize();
+
+
+    ret_code_t ret;
+    ret = wr_ble_app_whitelist_clear();
+    APP_ERROR_CHECK(ret);
+
+    TEST_set_whitelist_wr41(); // Добавляю браслет в список адресов
+
+    ret = wr_ble_app_whitelist_enable();
+    APP_ERROR_CHECK(ret);
+
+    wr_ble_app_whitelist_logshow(); //список адресов в addrlist
 
     // Start execution.
     NRF_LOG_INFO("Debug logging for UART over RTT started.");
     NRF_LOG_FLUSH();
 
-    advertising_start();
     scan_start();
     mesh_main_start();
 
