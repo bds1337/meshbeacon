@@ -120,14 +120,18 @@ NRF_BLE_GQ_DEF(m_ble_gatt_queue,                                        /**< BLE
                NRF_SDH_BLE_CENTRAL_LINK_COUNT,
                NRF_BLE_GQ_QUEUE_SIZE);
 
+APP_TIMER_DEF(m_single_shot_timer_id); // таймер (делей между командами измерения давления/пульса)
+
 static bool m_whitelist_disabled;          /**< True if the whitelist is temporarily disabled. */
 
 
 // Команды замера пульса и давления
+#define WR4119_CMD_LENGHT               0x0007 //12
 static uint8_t wr4119_cmd_pulse_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x01 }; 
 static uint8_t wr4119_cmd_pulse_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x00 };
 static uint8_t wr4119_cmd_pressure_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x01 };
 static uint8_t wr4119_cmd_pressure_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x00 };
+
 
 static uint16_t   m_conn_handle          = BLE_CONN_HANDLE_INVALID;                 /**< Handle of the current connection. */
 //static uint16_t   m_ble_nus_max_data_len = BLE_GATT_ATT_MTU_DEFAULT - 3;            /**< Maximum length of data (in bytes) that can be transmitted to the peer by the Nordic UART service module. */
@@ -179,14 +183,6 @@ static void nus_error_handler(uint32_t nrf_error)
     APP_ERROR_HANDLER(nrf_error);
 }
 
-/**@brief Function for initializing the timer module.
- */
-static void timers_init(void)
-{
-    ret_code_t err_code = app_timer_init();
-    APP_ERROR_CHECK(err_code);
-}
-
 /**@brief Function to start scanning.
  */
 static void scan_start(void)
@@ -203,6 +199,33 @@ static void scan_start(void)
     NRF_LOG_INFO("Scan start");
 }
 
+/**@brief Команда отправки сообщения через сервич Nordic UART (NUS)
+ *
+ * @param[in]   p_data	    Данные для отправки.
+ * @param[in]   data_len    Длина данных.
+ */
+static void ble_nus_wr4119_send_command(uint8_t * p_data, uint16_t data_len)
+{
+    ret_code_t ret_val;
+
+    NRF_LOG_INFO("Sending data:");
+    NRF_LOG_RAW_HEXDUMP_INFO(p_data, data_len);
+    
+    for (uint32_t i = 0; i< NRF_SDH_BLE_CENTRAL_LINK_COUNT; i++)
+    {
+        do
+        {
+            ret_val = ble_nus_c_string_send(&m_ble_nus_c[i], p_data, data_len);
+            // NOTE: Игнорим (<warning> ble_nus_c: Connection handle invalid.)
+            // Оно возникает потому что не все 8 браслетов подключено
+            if ((ret_val != NRF_SUCCESS) && (ret_val != NRF_ERROR_BUSY) && (ret_val != NRF_ERROR_INVALID_STATE))
+            {
+                NRF_LOG_ERROR("Failed sending NUS message. Error 0x%x. ", ret_val);
+                APP_ERROR_CHECK(ret_val);
+            }
+        } while (ret_val == NRF_ERROR_BUSY);
+    }
+}
 
 /**@brief Function for handling Queued Write Module errors.
  *
@@ -239,6 +262,12 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
             err_code = ble_nus_c_tx_notif_enable(p_ble_nus_c);
             APP_ERROR_CHECK(err_code);
             NRF_LOG_INFO("Connected to device with Nordic UART Service.");
+
+            // nus commands
+            ble_nus_wr4119_send_command(wr4119_cmd_pulse_start, WR4119_CMD_LENGHT);
+            err_code = app_timer_start(m_single_shot_timer_id, APP_TIMER_TICKS(3000), NULL); //3 секунды для дебага
+            APP_ERROR_CHECK(err_code);
+
             break;
 
         case BLE_NUS_C_EVT_NUS_TX_EVT:
@@ -591,6 +620,15 @@ static void scan_evt_handler(scan_evt_t const * p_scan_evt)
     }
 }
 
+/**@brief Timeout handler
+ */
+static void single_shot_timer_handler(void * p_context)
+{
+    ret_code_t err_code;
+    NRF_LOG_INFO("SINGLE SHOT TIMER.");
+    ble_nus_wr4119_send_command(wr4119_cmd_pulse_stop, WR4119_CMD_LENGHT);
+}
+
 /**@brief Function for handling events from the GATT library. */
 void gatt_evt_handler(nrf_ble_gatt_t * p_gatt, nrf_ble_gatt_evt_t const * p_evt)
 {
@@ -692,6 +730,19 @@ static void db_discovery_init(void)
     db_init.p_gatt_queue = &m_ble_gatt_queue;
 
     ret_code_t err_code = ble_db_discovery_init(&db_init);
+    APP_ERROR_CHECK(err_code);
+}
+
+/**@brief Function for initializing the timer module.
+ */
+static void timers_init(void)
+{
+    ret_code_t err_code = app_timer_init();
+    APP_ERROR_CHECK(err_code);
+
+    err_code = app_timer_create(&m_single_shot_timer_id,
+                                APP_TIMER_MODE_SINGLE_SHOT,
+                                single_shot_timer_handler);
     APP_ERROR_CHECK(err_code);
 }
 
