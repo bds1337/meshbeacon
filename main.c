@@ -835,6 +835,7 @@ int main(void)
     APP_ERROR_CHECK(ret);
 
     wr_ble_app_whitelist_logshow(); //список адресов в addrlist
+    
 
     // Start execution.
     NRF_LOG_INFO("Debug logging for UART over RTT started.");
@@ -842,6 +843,11 @@ int main(void)
 
     scan_start();
     mesh_main_start();
+
+    //for test
+    rtls_set_params_t set_params;
+    set_params.rssi = 0x69;
+    mesh_main_send_message(&set_params);
 
     // Enter main loop.
     for (;;)

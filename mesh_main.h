@@ -41,6 +41,8 @@
 
 #include <stdint.h>
 
+#include "rtls_client.h"
+
 /**
  * Initialize mesh part of coexistence example.
  */
@@ -58,5 +60,7 @@ void mesh_main_start(void);
  *                            development board, and so on).
  */
 void mesh_main_button_event_handler(uint32_t button_number);
+
+void mesh_main_send_message(const rtls_set_params_t * msg_params);
 
 #endif // MESH_MAIN_H__

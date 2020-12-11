@@ -201,6 +201,48 @@ static void config_server_evt_cb(const config_server_evt_t * p_evt)
     }
 }
 
+void mesh_main_send_message(const rtls_set_params_t * msg_params)
+{
+    uint32_t status = NRF_SUCCESS;
+    rtls_set_params_t * set_params;
+    model_transition_t transition_params;
+    
+    set_params = msg_params;
+
+    //__LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Sending msg: RSSI %d\n", set_params.rssi);
+    NRF_LOG_INFO("Sending msg: RSSI %d\n", set_params->rssi);
+
+    (void)access_model_reliable_cancel(m_clients[0].model_handle);
+    status = rtls_client_set(&m_clients[0], &set_params, &transition_params);
+    
+    switch (status)
+    {
+        case NRF_SUCCESS:
+            break;
+
+        case NRF_ERROR_NO_MEM:
+        case NRF_ERROR_BUSY:
+        case NRF_ERROR_INVALID_STATE:
+            NRF_LOG_INFO("Client cannot send\n");
+            break;
+
+        case NRF_ERROR_INVALID_PARAM:
+            /* Publication not enabled for this client. One (or more) of the following is wrong:
+             * - An application key is missing, or there is no application key bound to the model
+             * - The client does not have its publication state set
+             *
+             * It is the provisioner that adds an application key, binds it to the model and sets
+             * the model's publication state.
+             */
+            NRF_LOG_INFO("Publication not configured for client \n");
+            break;
+
+        default:
+            ERROR_CHECK(status);
+            break;
+    }
+}
+
 void mesh_main_button_event_handler(uint32_t button_number)
 {
     /* Increase button number because the buttons on the board is marked with 1 to 4 */
