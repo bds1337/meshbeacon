@@ -80,6 +80,7 @@
 #include "nrf_log_default_backends.h"
 
 #include "app_whitelist.h" //added
+#include "app_db.h"
 
 #define APP_BLE_CONN_CFG_TAG            1                                           /**< A tag identifying the SoftDevice BLE configuration. */
 #define APP_BLE_OBSERVER_PRIO       3                                   /**< BLE observer priority of the application. There is no need to modify this value. */
@@ -157,6 +158,8 @@ static ble_gap_scan_params_t m_scan_param =
 };
 
 static bool m_memory_access_in_progress;
+
+
 
 /**@brief Function for assert macro callback.
  *
@@ -251,6 +254,9 @@ static void nrf_qwr_error_handler(uint32_t nrf_error)
 static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t const * p_ble_nus_evt)
 {
     ret_code_t err_code;
+    bool ret;
+    uint8_t recived_type;
+    db_t device;
 
     switch (p_ble_nus_evt->evt_type)
     {
@@ -263,16 +269,51 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
             APP_ERROR_CHECK(err_code);
             NRF_LOG_INFO("Connected to device with Nordic UART Service.");
 
+            ble_gap_addr_t ble_addr;
+            //err_code = sd_ble_gap_addr_get(&ble_addr);
+            //NRF_LOG_INFO("addr 0x%02x:%02x\n", ble_addr.addr[0],ble_addr.addr[1]);
+            //APP_ERROR_CHECK(err_code);
+
             // nus commands
             ble_nus_wr4119_send_command(wr4119_cmd_pulse_start, WR4119_CMD_LENGHT);
-            err_code = app_timer_start(m_single_shot_timer_id, APP_TIMER_TICKS(3000), NULL); //3 секунды для дебага
+            err_code = app_timer_start(m_single_shot_timer_id, APP_TIMER_TICKS(10000), NULL); //10 секунд для дебага
             APP_ERROR_CHECK(err_code);
-
             break;
 
         case BLE_NUS_C_EVT_NUS_TX_EVT:
-            NRF_LOG_INFO("nus_tx: 0x%x [%d]",p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
-            break;
+        {
+            ret = true;
+            NRF_LOG_RAW_HEXDUMP_INFO(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
+
+            if ( p_ble_nus_evt->data_len < 6 )
+                return;
+
+            for ( int i = 0; i < 5; i++ )
+            {
+                if ( wr4119_cmd_pulse_start[i] != p_ble_nus_evt->p_data[i] )
+                {
+                    ret = false;
+                    break;
+                }
+                //NRF_LOG_INFO("[%d] %02x\n", i, p_ble_nus_evt->p_data[i]);
+            }
+            if ( ret == true )
+            {
+                //sd_ble_gap_addr_get
+                recived_type = p_ble_nus_evt->p_data[6];
+                if ( recived_type == 0x09 )
+                {
+                    device.smartband_data[0] = p_ble_nus_evt->p_data[8];
+                }
+                if ( recived_type == 0x21 )
+                {
+                    device.smartband_data[1] = p_ble_nus_evt->p_data[7];
+                    device.smartband_data[2] = p_ble_nus_evt->p_data[8];
+                }
+                app_db_add(&device);
+            }
+            //0x2003FE84
+         }  break;
 
         case BLE_NUS_C_EVT_DISCONNECTED:
             NRF_LOG_INFO("Disconnected.");
@@ -607,6 +648,17 @@ static void scan_evt_handler(scan_evt_t const * p_scan_evt)
         {
             NRF_LOG_INFO("NRF_BLE_SCAN_EVT_WHITELIST_ADV_REPORT");
             NRF_LOG_HEXDUMP_INFO(p_scan_evt->params.p_whitelist_adv_report, sizeof(p_scan_evt->params.p_whitelist_adv_report));
+            NRF_LOG_INFO("rssi: %02x\n", p_scan_evt->params.p_whitelist_adv_report->rssi);
+            
+            db_t device;
+            device.rssi = p_scan_evt->params.p_whitelist_adv_report->rssi;
+            for ( int j = 0 ; j < 6; j++ )
+            {
+                NRF_LOG_INFO("addr: %02x\n", p_scan_evt->params.p_whitelist_adv_report->peer_addr.addr[j]);
+                device.smartband_id[j] = p_scan_evt->params.p_whitelist_adv_report->peer_addr.addr[j];
+            } 
+            app_db_add(&device);
+
         } break;
 
         case NRF_BLE_SCAN_EVT_SCAN_TIMEOUT:
@@ -847,7 +899,7 @@ int main(void)
     //for test
     rtls_set_params_t set_params;
     set_params.rssi = 0x69;
-    mesh_main_send_message(&set_params);
+    //mesh_main_send_message(&set_params);
 
     // Enter main loop.
     for (;;)

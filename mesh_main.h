@@ -62,5 +62,6 @@ void mesh_main_start(void);
 void mesh_main_button_event_handler(uint32_t button_number);
 
 void mesh_main_send_message(const rtls_set_params_t * msg_params);
+//void mesh_main_send_message(rtls_set_params_t msg_params);
 
 #endif // MESH_MAIN_H__

@@ -68,6 +68,7 @@
 #include "app_config.h"
 #include "nrf_mesh_config_examples.h"
 #include "example_common.h"
+#include "app_db.h"
 
 /*****************************************************************************
  * Definitions
@@ -174,16 +175,10 @@ static void app_rtls_client_status_cb(const rtls_client_t * p_self,
                                                const access_message_rx_meta_t * p_meta,
                                                const rtls_status_params_t * p_in)
 {
-    if (p_in->remaining_time_ms > 0)
-    {
-        __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "OnOff server: 0x%04x, Present OnOff: %d, Target OnOff: %d, Remaining Time: %d ms\n",
-              p_meta->src.value, p_in->smartband_id, p_in->smartband_data, p_in->remaining_time_ms);
-    }
-    else
-    {
+
         __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "OnOff server: 0x%04x, Present OnOff: %d\n",
               p_meta->src.value, p_in->smartband_id);
-    }
+
 }
 
 static void node_reset(void)
@@ -204,16 +199,23 @@ static void config_server_evt_cb(const config_server_evt_t * p_evt)
 void mesh_main_send_message(const rtls_set_params_t * msg_params)
 {
     uint32_t status = NRF_SUCCESS;
-    rtls_set_params_t * set_params;
+    static uint8_t tid = 0;
+
+    //rtls_set_params_t * set_params;
     model_transition_t transition_params;
+
+    //msg_params.tid = tid++;
+    transition_params.delay_ms = APP_ONOFF_DELAY_MS;
+    transition_params.transition_time_ms = APP_ONOFF_TRANSITION_TIME_MS;
     
-    set_params = msg_params;
+    //set_params = msg_params;
 
     //__LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Sending msg: RSSI %d\n", set_params.rssi);
-    NRF_LOG_INFO("Sending msg: RSSI %d\n", set_params->rssi);
+    //NRF_LOG_INFO("Sending msg: RSSI %d\n", msg_params->rssi);
+    NRF_LOG_INFO("Sending msg: RSSI %d %02x\n", msg_params->rssi , msg_params->rssi);
 
     (void)access_model_reliable_cancel(m_clients[0].model_handle);
-    status = rtls_client_set(&m_clients[0], &set_params, &transition_params);
+    status = rtls_client_set(&m_clients[0], msg_params, &transition_params);
     
     switch (status)
     {
@@ -249,6 +251,7 @@ void mesh_main_button_event_handler(uint32_t button_number)
     button_number++;
     NRF_LOG_INFO("Button %u pressed\n", button_number);
 
+    db_t device;
     uint32_t status = NRF_SUCCESS;
     rtls_set_params_t set_params;
     model_transition_t transition_params;
@@ -262,19 +265,44 @@ void mesh_main_button_event_handler(uint32_t button_number)
     {
         case 1:
         case 3:
-            set_params.rssi = 0x69;
+            
+            //app_db_read( &device );
+            if ( app_db_read( &device ) )
+            {
+                set_params.rssi = device.rssi;
+                set_params.smartband_id[0] = device.smartband_id[0];
+                set_params.smartband_id[1] = device.smartband_id[1];
+                set_params.smartband_id[2] = device.smartband_id[2];
+                set_params.smartband_id[3] = device.smartband_id[3];
+                set_params.smartband_id[4] = device.smartband_id[4];
+                set_params.smartband_id[5] = device.smartband_id[5];
+
+                set_params.smartband_data[0] = device.smartband_data[0];
+                set_params.smartband_data[1] = device.smartband_data[1];
+                set_params.smartband_data[2] = device.smartband_data[2];
+            }
+            //BBBBBBAAAAAADEADB269
             break;
 
         case 2:
         case 4:
-            set_params.rssi = 0x11;
+            set_params.rssi = 0x69;
+            set_params.smartband_id[0] = 0xBB;
+            set_params.smartband_id[1] = 0xBB;
+            set_params.smartband_id[2] = 0xBB;
+            set_params.smartband_id[3] = 0xAA;
+            set_params.smartband_id[4] = 0xAA;
+            set_params.smartband_id[5] = 0xAA;
+
+            set_params.smartband_data[0] = 0xDE;
+            set_params.smartband_data[1] = 0xAD;
+            set_params.smartband_data[2] = 0xB2;
             break;
     }
 
     set_params.tid = tid++;
     transition_params.delay_ms = APP_ONOFF_DELAY_MS;
     transition_params.transition_time_ms = APP_ONOFF_TRANSITION_TIME_MS;
-    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Sending msg: RSSI %d\n", set_params.rssi);
 
     switch (button_number)
     {
@@ -282,8 +310,9 @@ void mesh_main_button_event_handler(uint32_t button_number)
         case 2:
             /* Demonstrate acknowledged transaction, using 1st client model instance */
             /* In this examples, users will not be blocked if the model is busy */
-            (void)access_model_reliable_cancel(m_clients[0].model_handle);
-            status = rtls_client_set(&m_clients[0], &set_params, &transition_params);
+            mesh_main_send_message(&set_params);
+            //(void)access_model_reliable_cancel(m_clients[0].model_handle);
+            //status = rtls_client_set(&m_clients[0], &set_params, &transition_params);
             break;
 
         case 3:

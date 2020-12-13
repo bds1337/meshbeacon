@@ -97,6 +97,7 @@
       <file file_name="../config/sdk_config.h" />
       <file file_name="../../../mesh_main.c" />
       <file file_name="../../../app_whitelist/app_whitelist.c" />
+      <file file_name="../../../app_db.c" />
     </folder>
     <folder Name="nRF_Segger_RTT">
       <file file_name="../../../../../../external/segger_rtt/SEGGER_RTT.c" />
