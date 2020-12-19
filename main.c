@@ -121,18 +121,21 @@ NRF_BLE_GQ_DEF(m_ble_gatt_queue,                                        /**< BLE
                NRF_SDH_BLE_CENTRAL_LINK_COUNT,
                NRF_BLE_GQ_QUEUE_SIZE);
 
-APP_TIMER_DEF(m_single_shot_timer_id); // таймер (делей между командами измерения давления/пульса)
+APP_TIMER_DEF(m_single_shot_timer_id); // таймер между командами измерения давления/пульса
 
 static bool m_whitelist_disabled;          /**< True if the whitelist is temporarily disabled. */
 
 
-// Команды замера пульса и давления
+// Команды для измерения пульса и давления 
 #define WR4119_CMD_LENGHT               0x0007 //12
-static uint8_t wr4119_cmd_pulse_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x01 }; 
-static uint8_t wr4119_cmd_pulse_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x00 };
-static uint8_t wr4119_cmd_pressure_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x01 };
-static uint8_t wr4119_cmd_pressure_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x00 };
+static const uint8_t wr4119_cmd_pulse_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x01 }; 
+static const uint8_t wr4119_cmd_pulse_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x00 };
+static const uint8_t wr4119_cmd_pressure_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x01 };
+static const uint8_t wr4119_cmd_pressure_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x00 };
+static const uint8_t wr4119_cmd_recv_type[5] = { 0xAB, 0x00, 0x05, 0xFF, 0x31 };
 
+
+static ble_gap_addr_t nus_addr_connhandle[NRF_SDH_BLE_TOTAL_LINK_COUNT];
 
 static uint16_t   m_conn_handle          = BLE_CONN_HANDLE_INVALID;                 /**< Handle of the current connection. */
 //static uint16_t   m_ble_nus_max_data_len = BLE_GATT_ATT_MTU_DEFAULT - 3;            /**< Maximum length of data (in bytes) that can be transmitted to the peer by the Nordic UART service module. */
@@ -254,7 +257,7 @@ static void nrf_qwr_error_handler(uint32_t nrf_error)
 static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t const * p_ble_nus_evt)
 {
     ret_code_t err_code;
-    bool ret;
+    bool healthdata;
     uint8_t recived_type;
     db_t device;
 
@@ -282,23 +285,34 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
 
         case BLE_NUS_C_EVT_NUS_TX_EVT:
         {
-            ret = true;
+            healthdata = true;
             NRF_LOG_RAW_HEXDUMP_INFO(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
+            
+            NRF_LOG_INFO("TX from: %02x%02x%02x%02x%02x%02x", 
+                nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[5],
+                nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[4],
+                nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[3],
+                nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[2],
+                nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[1],
+                nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[0]
+            );
+            
 
             if ( p_ble_nus_evt->data_len < 6 )
-                return;
+                return;            
 
             for ( int i = 0; i < 5; i++ )
             {
-                if ( wr4119_cmd_pulse_start[i] != p_ble_nus_evt->p_data[i] )
+                if ( wr4119_cmd_recv_type[i] != p_ble_nus_evt->p_data[i] )
                 {
-                    ret = false;
+                    //NRF_LOG_DEBUG("[%d] %02x != %02x\n", i, wr4119_cmd_pulse_start[i], p_ble_nus_evt->p_data[i]);
+                    healthdata = false;
                     break;
                 }
-                //NRF_LOG_INFO("[%d] %02x\n", i, p_ble_nus_evt->p_data[i]);
             }
-            if ( ret == true )
+            if ( healthdata == true )
             {
+                //NRF_LOG_DEBUG("healthdata = true");
                 //sd_ble_gap_addr_get
                 recived_type = p_ble_nus_evt->p_data[6];
                 if ( recived_type == 0x09 )
@@ -310,6 +324,10 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
                     device.smartband_data[1] = p_ble_nus_evt->p_data[7];
                     device.smartband_data[2] = p_ble_nus_evt->p_data[8];
                 }
+                for ( int j = 0 ; j < 6; j++ )
+                {
+                    device.smartband_id[j] = nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[j];
+                } 
                 app_db_add(&device);
             }
             //0x2003FE84
@@ -444,8 +462,17 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
     switch (p_ble_evt->header.evt_id)
     {
         case BLE_GAP_EVT_CONNECTED:
-            NRF_LOG_INFO("Connection 0x%x established, starting DB discovery.",
-                         p_gap_evt->conn_handle);
+            NRF_LOG_INFO("Connection established: %02x", p_gap_evt->conn_handle);
+            NRF_LOG_INFO("Connection established: %02x%02x%02x%02x%02x%02x",
+                p_ble_evt->evt.gap_evt.params.connected.peer_addr.addr[0], 
+                p_ble_evt->evt.gap_evt.params.connected.peer_addr.addr[1], 
+                p_ble_evt->evt.gap_evt.params.connected.peer_addr.addr[2], 
+                p_ble_evt->evt.gap_evt.params.connected.peer_addr.addr[3], 
+                p_ble_evt->evt.gap_evt.params.connected.peer_addr.addr[4], 
+                p_ble_evt->evt.gap_evt.params.connected.peer_addr.addr[5]
+            );
+
+            nus_addr_connhandle[p_gap_evt->conn_handle] = p_ble_evt->evt.gap_evt.params.connected.peer_addr;
 
             APP_ERROR_CHECK_BOOL(p_gap_evt->conn_handle < NRF_SDH_BLE_CENTRAL_LINK_COUNT);
 
@@ -648,13 +675,14 @@ static void scan_evt_handler(scan_evt_t const * p_scan_evt)
         {
             NRF_LOG_INFO("NRF_BLE_SCAN_EVT_WHITELIST_ADV_REPORT");
             NRF_LOG_HEXDUMP_INFO(p_scan_evt->params.p_whitelist_adv_report, sizeof(p_scan_evt->params.p_whitelist_adv_report));
-            NRF_LOG_INFO("rssi: %02x\n", p_scan_evt->params.p_whitelist_adv_report->rssi);
+            NRF_LOG_INFO("rssi: %02x", p_scan_evt->params.p_whitelist_adv_report->rssi);
             
             db_t device;
             device.rssi = p_scan_evt->params.p_whitelist_adv_report->rssi;
+            NRF_LOG_INFO("addr:");
             for ( int j = 0 ; j < 6; j++ )
             {
-                NRF_LOG_INFO("addr: %02x\n", p_scan_evt->params.p_whitelist_adv_report->peer_addr.addr[j]);
+                NRF_LOG_INFO("%02x", p_scan_evt->params.p_whitelist_adv_report->peer_addr.addr[j]);
                 device.smartband_id[j] = p_scan_evt->params.p_whitelist_adv_report->peer_addr.addr[j];
             } 
             app_db_add(&device);
@@ -862,7 +890,7 @@ int main(void)
     bool erase_bonds; // ram_start 0x20002a38
 
     // Initialize.
-    log_init();
+                                 log_init();
     timers_init();
     buttons_leds_init(&erase_bonds);
     db_discovery_init();
