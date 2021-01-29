@@ -79,7 +79,6 @@
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
 
-#include "app_whitelist.h" //added
 #include "app_db.h"
 
 #define APP_BLE_CONN_CFG_TAG            1                                           /**< A tag identifying the SoftDevice BLE configuration. */
@@ -112,10 +111,9 @@
 
 
 //BLE_NUS_DEF(m_nus, NRF_SDH_BLE_TOTAL_LINK_COUNT);                                   /**< BLE NUS service instance. */
-BLE_NUS_C_ARRAY_DEF(m_ble_nus_c, NRF_SDH_BLE_CENTRAL_LINK_COUNT); 
-BLE_DB_DISCOVERY_ARRAY_DEF(m_db_disc, NRF_SDH_BLE_CENTRAL_LINK_COUNT);  /**< Database discovery module instances. */
+BLE_NUS_C_DEF(m_ble_nus_c);                                             /**< BLE Nordic UART Service (NUS) client instance. */
+BLE_DB_DISCOVERY_DEF(m_db_disc);                                        /**< Database discovery module instance. */
 NRF_BLE_GATT_DEF(m_gatt);                                                           /**< GATT module instance. */
-//NRF_BLE_QWR_DEF(m_qwr);                                                             /**< Context for the Queued Write module.*/
 NRF_BLE_SCAN_DEF(m_scan);                                       /**< Scanning module instance. */
 NRF_BLE_GQ_DEF(m_ble_gatt_queue,                                        /**< BLE GATT Queue instance. */
                NRF_SDH_BLE_CENTRAL_LINK_COUNT,
@@ -150,13 +148,31 @@ static ble_uuid_t const m_nus_uuid =
     .type = NUS_SERVICE_UUID_TYPE
 };
 
+
+// wr41 addrs
+// E2:7A:50:BF:04:FA // Eugene wr41
+// c9 91 a1 32 8d bc 
+//{0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} (little-endian)
+/**< conn addr */
+static ble_gap_addr_t m_target_periph_addr =
+{
+    .addr_type = BLE_GAP_ADDR_TYPE_RANDOM_STATIC,
+    .addr      = {0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} // reversed from nrf connect (little-endian)
+    //.addr      = {0xEF, 0xCC, 0x8F, 0xF8, 0x87, 0x50} // reversed from nrf connect (little-endian)
+};
+
 /**< Scan parameters requested for scanning and connection. */
 static ble_gap_scan_params_t m_scan_param =
 {
-        .active        = 0x00,           /* Disable the acvtive scanning */
-        .interval      = NRF_BLE_SCAN_SCAN_INTERVAL,
-        .window        = NRF_BLE_SCAN_SCAN_WINDOW,
-        .filter_policy = BLE_GAP_SCAN_FP_WHITELIST, //BLE_GAP_SCAN_FP_WHITELIST BLE_GAP_SCAN_FP_ACCEPT_ALL
+    .active        = 0x01,
+#if (NRF_SD_BLE_API_VERSION > 7)
+    .interval_us   = NRF_BLE_SCAN_SCAN_INTERVAL * UNIT_0_625_MS,
+    .window_us     = NRF_BLE_SCAN_SCAN_WINDOW * UNIT_0_625_MS,
+#else
+    .interval      = NRF_BLE_SCAN_SCAN_INTERVAL,
+    .window        = NRF_BLE_SCAN_SCAN_WINDOW,
+#endif
+        .filter_policy = BLE_GAP_SCAN_FP_ACCEPT_ALL, //BLE_GAP_SCAN_FP_WHITELIST BLE_GAP_SCAN_FP_ACCEPT_ALL
         .timeout       = 0, //SCAN_DURATION_WHITELIST
         .scan_phys     = BLE_GAP_PHY_1MBPS,
 };
@@ -195,12 +211,7 @@ static void nus_error_handler(uint32_t nrf_error)
 static void scan_start(void)
 {
     ret_code_t err_code;
-    // If there is any pending write to flash, defer scanning until it completes.
-    if (nrf_fstorage_is_busy(NULL))
-    {
-        m_memory_access_in_progress = true;
-        return;
-    }
+
     err_code = nrf_ble_scan_start(&m_scan);
     APP_ERROR_CHECK(err_code);
     NRF_LOG_INFO("Scan start");
@@ -222,7 +233,7 @@ static void ble_nus_wr4119_send_command(uint8_t * p_data, uint16_t data_len)
     {
         do
         {
-            ret_val = ble_nus_c_string_send(&m_ble_nus_c[i], p_data, data_len);
+            ret_val = ble_nus_c_string_send(&m_ble_nus_c, p_data, data_len);
             // NOTE: Игнорим (<warning> ble_nus_c: Connection handle invalid.)
             // Оно возникает потому что не все 8 браслетов подключено
             if ((ret_val != NRF_SUCCESS) && (ret_val != NRF_ERROR_BUSY) && (ret_val != NRF_ERROR_INVALID_STATE))
@@ -347,29 +358,16 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
  */
 static void services_init(void)
 {
-    uint32_t           err_code;
-    ble_nus_c_init_t     nus_init;
-    //nrf_ble_qwr_init_t qwr_init = {0};
+    ret_code_t       err_code;
+    ble_nus_c_init_t init;
 
-    // Initialize Queued Write Module.
-    //qwr_init.error_handler = nrf_qwr_error_handler;
+    init.evt_handler   = ble_nus_c_evt_handler;
+    init.error_handler = nus_error_handler;
+    init.p_gatt_queue  = &m_ble_gatt_queue;
 
-    //err_code = nrf_ble_qwr_init(&m_qwr, &qwr_init);
-    //APP_ERROR_CHECK(err_code);
-
-    // Initialize NUS.
-    memset(&nus_init, 0, sizeof(nus_init));
-
-    //nus_init.data_handler = ble_nus_c_evt_handler;
-    nus_init.evt_handler = ble_nus_c_evt_handler;
-    nus_init.error_handler = nus_error_handler;
-    nus_init.p_gatt_queue  = &m_ble_gatt_queue;
-
-    for (uint32_t i = 0; i < NRF_SDH_BLE_CENTRAL_LINK_COUNT; i++)
-    {
-        err_code = ble_nus_c_init(&m_ble_nus_c[i], &nus_init);
-        APP_ERROR_CHECK(err_code);
-    }
+    err_code = ble_nus_c_init(&m_ble_nus_c, &init);
+    APP_ERROR_CHECK(err_code);
+   
 }
 
 
@@ -436,8 +434,6 @@ static void conn_params_init(void)
 static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 {
     uint32_t err_code;
-
-    // For readability.
     ble_gap_evt_t const * p_gap_evt = &p_ble_evt->evt.gap_evt;
 
     switch (p_ble_evt->header.evt_id)
@@ -455,26 +451,19 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 
             nus_addr_connhandle[p_gap_evt->conn_handle] = p_ble_evt->evt.gap_evt.params.connected.peer_addr;
 
-            APP_ERROR_CHECK_BOOL(p_gap_evt->conn_handle < NRF_SDH_BLE_CENTRAL_LINK_COUNT);
+            //APP_ERROR_CHECK_BOOL(p_gap_evt->conn_handle < NRF_SDH_BLE_CENTRAL_LINK_COUNT);
 
-            err_code = ble_nus_c_handles_assign(&m_ble_nus_c[p_gap_evt->conn_handle],
+            err_code = ble_nus_c_handles_assign(&m_ble_nus_c,
                                                 p_gap_evt->conn_handle,
                                                 NULL);
             APP_ERROR_CHECK(err_code);
 
 
-            err_code = ble_db_discovery_start(&m_db_disc[p_gap_evt->conn_handle],
+            err_code = ble_db_discovery_start(&m_db_disc,
                                               p_gap_evt->conn_handle);
-            if (err_code != NRF_ERROR_BUSY)
-            {
-                APP_ERROR_CHECK(err_code);
-            }
 
-            if (ble_conn_state_central_conn_count() != NRF_SDH_BLE_CENTRAL_LINK_COUNT)
-            {
-                // Продолжаю сканировать
-                scan_start();
-            }
+            APP_ERROR_CHECK(err_code);
+
 
             //err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
             //APP_ERROR_CHECK(err_code);
@@ -487,8 +476,6 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             NRF_LOG_INFO("LBS central link 0x%x disconnected (reason: 0x%x)",
                          p_gap_evt->conn_handle,
                          p_gap_evt->params.disconnected.reason);
-            // LED indication will be changed when advertising starts.
-            m_conn_handle = BLE_CONN_HANDLE_INVALID;
             break;
 
         case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
@@ -538,7 +525,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
         
         case BLE_GAP_EVT_ADV_REPORT:
         {
-            //NRF_LOG_RAW_HEXDUMP_INFO (m_scan.scan_buffer.p_data, m_scan.scan_buffer.len);
+            NRF_LOG_RAW_HEXDUMP_INFO (m_scan.scan_buffer.p_data, m_scan.scan_buffer.len);
             //NRF_LOG_RAW_INFO ("RSSI: %d\r\n", p_ble_evt->params.adv_report.rssi); // TODO: fix rssi report
             //NRF_LOG_RAW_INFO ("\r\n");
         } break;
@@ -549,32 +536,6 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
     }
 }
 
-/**
- * @brief SoftDevice SoC event handler.
- *
- * @param[in] evt_id    SoC event.
- * @param[in] p_context Context.
- */
-static void soc_evt_handler(uint32_t evt_id, void * p_context)
-{
-    switch (evt_id)
-    {
-        case NRF_EVT_FLASH_OPERATION_SUCCESS:
-        /* fall through */
-        case NRF_EVT_FLASH_OPERATION_ERROR:
-
-            if (m_memory_access_in_progress)
-            {
-                m_memory_access_in_progress = false;
-                scan_start();
-            }
-            break;
-
-        default:
-            // No implementation needed.
-            break;
-    }
-}
 
 /**@brief Function for the SoftDevice initialization.
  *
@@ -601,35 +562,6 @@ static void ble_stack_init(void)
     NRF_SDH_BLE_OBSERVER(m_ble_observer, APP_BLE_OBSERVER_PRIO, ble_evt_handler, NULL);
 }
 
-static void on_whitelist_req(void)
-{
-    ret_code_t ret;
-    if ( ( (wr_ble_app_whitelist_count() == 0) ) || (m_whitelist_disabled) )
-    {
-        m_scan_param.filter_policy = BLE_GAP_SCAN_FP_ACCEPT_ALL;
-        ret = nrf_ble_scan_params_set(&m_scan, &m_scan_param);
-        APP_ERROR_CHECK(ret);
-    }
-    else
-    {
-        ret = wr_ble_app_whitelist_enable();
-        APP_ERROR_CHECK(ret);
-    }
-}
-
-/**@brief Function for disabling the use of the whitelist for scanning.
- */
-static void whitelist_disable(void)
-{
-    if (!m_whitelist_disabled)
-    {
-        NRF_LOG_INFO("Whitelist temporarily disabled.");
-        m_whitelist_disabled = true;
-        nrf_ble_scan_stop();
-        scan_start();
-    }
-}
-
 /**@brief Function for handling Scaning events.
  *
  * @param[in]   p_scan_evt   Scanning event.
@@ -645,13 +577,22 @@ static void scan_evt_handler(scan_evt_t const * p_scan_evt)
             err_code = p_scan_evt->params.connecting_err.err_code;
             APP_ERROR_CHECK(err_code);
         } break;
-        
-        case NRF_BLE_SCAN_EVT_WHITELIST_REQUEST:
-        {
-            on_whitelist_req();
-            m_whitelist_disabled = false;
-        } break;
-        
+
+         case NRF_BLE_SCAN_EVT_CONNECTED:
+         {
+              ble_gap_evt_connected_t const * p_connected =
+                               p_scan_evt->params.connected.p_connected;
+             // Scan is automatically stopped by the connection.
+             NRF_LOG_INFO("Connecting to target %02x%02x%02x%02x%02x%02x",
+                      p_connected->peer_addr.addr[0],
+                      p_connected->peer_addr.addr[1],
+                      p_connected->peer_addr.addr[2],
+                      p_connected->peer_addr.addr[3],
+                      p_connected->peer_addr.addr[4],
+                      p_connected->peer_addr.addr[5]
+                      );
+         } break;
+        /*
         case NRF_BLE_SCAN_EVT_WHITELIST_ADV_REPORT:
         {
             //NRF_LOG_INFO("NRF_BLE_SCAN_EVT_WHITELIST_ADV_REPORT");
@@ -661,7 +602,7 @@ static void scan_evt_handler(scan_evt_t const * p_scan_evt)
             
             db_t device;
             device.rssi = p_scan_evt->params.p_whitelist_adv_report->rssi;
-            /*
+           
             NRF_LOG_INFO("addr:");
             for ( int j = 0 ; j < 6; j++ )
             {
@@ -669,10 +610,10 @@ static void scan_evt_handler(scan_evt_t const * p_scan_evt)
                 device.smartband_id[j] = p_scan_evt->params.p_whitelist_adv_report->peer_addr.addr[j];
             } 
             app_db_add(&device);
-            */
+            
 
         } break;
-
+        */
         case NRF_BLE_SCAN_EVT_SCAN_TIMEOUT:
         {
             NRF_LOG_INFO("Scan timed out.");
@@ -750,7 +691,7 @@ static void log_init(void)
  */
 static void db_disc_handler(ble_db_discovery_evt_t * p_evt)
 {
-    ble_nus_c_on_db_disc_evt(&m_ble_nus_c[p_evt->conn_handle], p_evt);
+    ble_nus_c_on_db_disc_evt(&m_ble_nus_c, p_evt);
 }
 
 /**@brief Database discovery initialization.
@@ -806,8 +747,15 @@ static void scan_init(bool is_conn)
 
     err_code = nrf_ble_scan_init(&m_scan, &init_scan, scan_evt_handler);
     APP_ERROR_CHECK(err_code);
+   
+    err_code = nrf_ble_scan_filter_set(&m_scan, SCAN_ADDR_FILTER, m_target_periph_addr.addr);
+    APP_ERROR_CHECK(err_code);
+
+    err_code = nrf_ble_scan_filters_enable(&m_scan,
+                                           NRF_BLE_SCAN_ADDR_FILTER,
+                                           false);
+    APP_ERROR_CHECK(err_code);
     
-    m_whitelist_disabled = false;
 }
 
 /**@brief Function for handling the idle state (main loop).
@@ -820,42 +768,6 @@ static void idle_state_handle(void)
     nrf_pwr_mgmt_run();
 }
 
-// E2:7A:50:BF:04:FA
-static void TEST_set_whitelist_nrf() // c9 91 a1 32 8d bc
-{
-    ret_code_t ret;
-    ble_gap_addr_t whitelist_addrs;
-    uint8_t whitelist_num = 0;
-    whitelist_addrs.addr_type = BLE_GAP_ADDR_TYPE_RANDOM_STATIC;
-    //{0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF}
-    whitelist_addrs.addr[5] = 0xc9;
-    whitelist_addrs.addr[4] = 0x91;
-    whitelist_addrs.addr[3] = 0xa1;
-    whitelist_addrs.addr[2] = 0x32;
-    whitelist_addrs.addr[1] = 0x8d;
-    whitelist_addrs.addr[0] = 0xbc;
-    ret = wr_ble_app_whitelist_add(&whitelist_addrs, &whitelist_num);
-    NRF_LOG_INFO("addlist num: %u", whitelist_num);
-    APP_ERROR_CHECK(ret);
-}
-
-static void TEST_set_whitelist_wr41()
-{
-    ret_code_t ret;
-    ble_gap_addr_t whitelist_addrs;
-    uint8_t whitelist_num = 0;
-    whitelist_addrs.addr_type = BLE_GAP_ADDR_TYPE_RANDOM_STATIC;
-    //{0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF}
-    whitelist_addrs.addr[5] = 0xef;
-    whitelist_addrs.addr[4] = 0xcc;
-    whitelist_addrs.addr[3] = 0x8f;
-    whitelist_addrs.addr[2] = 0xf8;
-    whitelist_addrs.addr[1] = 0x87;
-    whitelist_addrs.addr[0] = 0x50;
-    ret = wr_ble_app_whitelist_add(&whitelist_addrs, &whitelist_num);
-    NRF_LOG_INFO("addlist num: %u", whitelist_num);
-    APP_ERROR_CHECK(ret);
-}
 
 /**@brief Application main function.
  */
@@ -877,21 +789,7 @@ int main(void)
     
     conn_params_init();
     mesh_main_initialize();
-
-
-    ret_code_t ret;
-    ret = wr_ble_app_whitelist_clear();
-    APP_ERROR_CHECK(ret);
-
-    TEST_set_whitelist_wr41(); // Добавляю браслет в список адресов
-    TEST_set_whitelist_nrf();
-
-    ret = wr_ble_app_whitelist_enable();
-    APP_ERROR_CHECK(ret);
-
-    wr_ble_app_whitelist_logshow(); //список адресов в addrlist
     
-
     // Start execution.
     NRF_LOG_INFO("Debug logging for UART over RTT started.");
     NRF_LOG_FLUSH();
