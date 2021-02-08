@@ -73,9 +73,6 @@
 /*****************************************************************************
  * Definitions
  *****************************************************************************/
-#define APP_STATE_OFF                (0)
-#define APP_STATE_ON                 (1)
-
 #define APP_UNACK_MSG_REPEAT_COUNT   (2)
 
 #define MESH_SOC_OBSERVER_PRIO  0
@@ -104,7 +101,7 @@ static void app_gen_onoff_client_transaction_status_cb(access_model_handle_t mod
 /*****************************************************************************
  * Static variables
  *****************************************************************************/
-static rtls_client_t m_clients[CLIENT_MODEL_INSTANCE_COUNT];
+static rtls_client_t          m_clients[1]; //CLIENT_MODEL_INSTANCE_COUNT
 static bool                   m_device_provisioned;
 
 const rtls_client_callbacks_t client_cbs =
@@ -351,15 +348,11 @@ static void models_init_cb(void)
 {
     NRF_LOG_INFO("Initializing and adding models\n");
 
-    for (uint32_t i = 0; i < CLIENT_MODEL_INSTANCE_COUNT; ++i)
-    {
-        m_clients[i].settings.p_callbacks = &client_cbs;
-        m_clients[i].settings.timeout = 0;
-        m_clients[i].settings.force_segmented = APP_FORCE_SEGMENTATION;
-        m_clients[i].settings.transmic_size = APP_MIC_SIZE;
-
-        ERROR_CHECK(rtls_client_init(&m_clients[i], i + 1));
-    }
+    m_clients[0].settings.p_callbacks = &client_cbs;
+    m_clients[0].settings.timeout = 0;
+    m_clients[0].settings.force_segmented = APP_FORCE_SEGMENTATION;
+    m_clients[0].settings.transmic_size = APP_MIC_SIZE;
+    ERROR_CHECK(rtls_client_init(&m_clients[0], 0));
 }
 
 void mesh_init(void)
