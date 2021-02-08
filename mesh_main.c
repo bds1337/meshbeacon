@@ -93,8 +93,7 @@
 /*****************************************************************************
  * Forward declaration of static functions
  *****************************************************************************/
-static void app_gen_onoff_client_publish_interval_cb(access_model_handle_t handle, void * p_self);
-static void app_rtls_client_status_cb(const rtls_client_t * p_self,
+static void app_generic_onoff_client_status_cb(const rtls_client_t * p_self,
                                                const access_message_rx_meta_t * p_meta,
                                                const rtls_status_params_t * p_in);
 static void app_gen_onoff_client_transaction_status_cb(access_model_handle_t model_handle,
@@ -110,9 +109,8 @@ static bool                   m_device_provisioned;
 
 const rtls_client_callbacks_t client_cbs =
 {
-    .rtls_status_cb = app_rtls_client_status_cb,
-    .ack_transaction_status_cb = app_gen_onoff_client_transaction_status_cb,
-    .periodic_publish_cb = app_gen_onoff_client_publish_interval_cb
+    .rtls_status_cb = app_generic_onoff_client_status_cb,
+    .ack_transaction_status_cb = app_gen_onoff_client_transaction_status_cb
 };
 
 static void mesh_soc_evt_handler(uint32_t evt_id, void * p_context)
@@ -171,14 +169,24 @@ static void app_gen_onoff_client_transaction_status_cb(access_model_handle_t mod
 }
 
 /* Generic OnOff client model interface: Process the received status message in this callback */
-static void app_rtls_client_status_cb(const rtls_client_t * p_self,
+static void app_generic_onoff_client_status_cb(const rtls_client_t * p_self,
                                                const access_message_rx_meta_t * p_meta,
                                                const rtls_status_params_t * p_in)
 {
-
-        __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "OnOff server: 0x%04x, Present OnOff: %d\n",
-              p_meta->src.value, p_in->smartband_id);
-
+    if (p_in->type == RTLS_PULSE_TYPE)
+    {
+        __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: 0x%x, to: 0x%x complete.\n", p_in->pulse, p_meta->src.value);
+    }
+    else if (p_in->type == RTLS_PRESSURE_TYPE)
+    {
+        __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: 0x%x|0x%x to: 0x%x complete.\n", p_in->pressure.pressure_up, 
+                                            p_in->pressure.pressure_down, p_meta->src.value);
+    }
+    else if (p_in->type == RTLS_RSSI_TYPE)
+    {
+        __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: rssi = 0x%x addr = 0x%x to: 0x%x complete.\n", p_in->rssi.rssi,
+                                            p_in->rssi.tag_id, p_meta->src.value);
+    }
 }
 
 static void node_reset(void)
@@ -212,7 +220,7 @@ void mesh_main_send_message(const rtls_set_params_t * msg_params)
 
     //__LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Sending msg: RSSI %d\n", set_params.rssi);
     //NRF_LOG_INFO("Sending msg: RSSI %d\n", msg_params->rssi);
-    NRF_LOG_INFO("Sending msg: RSSI %d %02x\n", msg_params->rssi , msg_params->rssi);
+    NRF_LOG_INFO("Sending msg: RSSI %d %02x\n", msg_params->rssi.rssi ,  msg_params->rssi.rssi);
 
     (void)access_model_reliable_cancel(m_clients[0].model_handle);
     status = rtls_client_set(&m_clients[0], msg_params, &transition_params);
@@ -254,84 +262,58 @@ void mesh_main_button_event_handler(uint32_t button_number)
     db_t device;
     uint32_t status = NRF_SUCCESS;
     rtls_set_params_t set_params;
-    model_transition_t transition_params;
-    static uint8_t tid = 0;
-
-    /* Button 1: On, Button 2: Off, Client[0]
-     * Button 2: On, Button 3: Off, Client[1]
-     */
 
     switch(button_number)
     {
         case 1:
-        case 3:
-            
-            //app_db_read( &device );
-            if ( app_db_read( &device ) )
-            {
-                set_params.rssi = device.rssi;
-                set_params.smartband_id[0] = device.smartband_id[0];
-                set_params.smartband_id[1] = device.smartband_id[1];
-                set_params.smartband_id[2] = device.smartband_id[2];
-                set_params.smartband_id[3] = device.smartband_id[3];
-                set_params.smartband_id[4] = device.smartband_id[4];
-                set_params.smartband_id[5] = device.smartband_id[5];
-
-                set_params.smartband_data[0] = device.smartband_data[0];
-                set_params.smartband_data[1] = device.smartband_data[1];
-                set_params.smartband_data[2] = device.smartband_data[2];
-            }
-            //BBBBBBAAAAAADEADB269
+            set_params.type = RTLS_PULSE_TYPE;
+            set_params.pulse = 0xFB;
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: 0x%x start.\n", set_params.pulse);
             break;
-
         case 2:
+            set_params.type = RTLS_PRESSURE_TYPE;
+            set_params.pressure.pressure_up = 0xB2;
+            set_params.pressure.pressure_down = 0x2B;
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: 0x%x|0x%x start.\n", set_params.pressure.pressure_up, 
+                                            set_params.pressure.pressure_down);
+            break;
+        case 3:
+            set_params.type = RTLS_RSSI_TYPE;
+            set_params.rssi.rssi = 0xC6;
+            set_params.rssi.tag_id = 0xA6F6;
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: rssi = 0x%x addr = 0x%x start.\n", set_params.rssi.rssi,
+                                            set_params.rssi.tag_id);
+            break;
         case 4:
-            set_params.rssi = 0x69;
-            set_params.smartband_id[0] = 0xBB;
-            set_params.smartband_id[1] = 0xBB;
-            set_params.smartband_id[2] = 0xBB;
-            set_params.smartband_id[3] = 0xAA;
-            set_params.smartband_id[4] = 0xAA;
-            set_params.smartband_id[5] = 0xAA;
-
-            set_params.smartband_data[0] = 0xDE;
-            set_params.smartband_data[1] = 0xAD;
-            set_params.smartband_data[2] = 0xB2;
+            set_params.type = RTLS_RSSI_TYPE;
+            set_params.rssi.rssi = 0xAA;
+            set_params.rssi.tag_id = 0xBDBD;
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: rssi = 0x%x addr = 0x%x start.\n", set_params.rssi.rssi,
+                                            set_params.rssi.tag_id);
             break;
     }
 
-    NRF_LOG_INFO("id %02x", set_params.smartband_id[0]);
-    NRF_LOG_INFO("id %02x", set_params.smartband_id[1]);
-    NRF_LOG_INFO("id %02x", set_params.smartband_id[2]);
-    NRF_LOG_INFO("id %02x", set_params.smartband_id[3]);
-    NRF_LOG_INFO("id %02x", set_params.smartband_id[4]);
-    NRF_LOG_INFO("id %02x", set_params.smartband_id[5]);
-    NRF_LOG_INFO("data %02x", set_params.smartband_data[0]);
-    NRF_LOG_INFO("data %02x", set_params.smartband_data[1]);
-    NRF_LOG_INFO("data %02x", set_params.smartband_data[2]);
-
-    set_params.tid = tid++;
-    transition_params.delay_ms = APP_ONOFF_DELAY_MS;
-    transition_params.transition_time_ms = APP_ONOFF_TRANSITION_TIME_MS;
-
+    NRF_LOG_INFO("pulse      %02x", set_params.pulse);
+    NRF_LOG_INFO("pressure d %02x", set_params.pressure.pressure_down);
+    NRF_LOG_INFO("pressure u %02x", set_params.pressure.pressure_up);
     switch (button_number)
     {
         case 1:
         case 2:
-            NRF_LOG_INFO("SEND ACK (1-2)");
-            /* Demonstrate acknowledged transaction, using 1st client model instance */
-            /* In this examples, users will not be blocked if the model is busy */
-            mesh_main_send_message(&set_params);
-            //(void)access_model_reliable_cancel(m_clients[0].model_handle);
-            //status = rtls_client_set(&m_clients[0], &set_params, &transition_params);
+            NRF_LOG_INFO("send data - unack");
+            status = rtls_client_set_unack(&m_clients[0], &set_params, NULL, 2);
+            //hal_led_blink_ms(BSP_LED_3, 200, 2); // TODO: блинк светодиодом донгола
             break;
 
         case 3:
         case 4:
-            NRF_LOG_INFO("SEND UNACK (3-4)");
-            /* Demonstrate un-acknowledged transaction, using 2nd client model instance */
-            status = rtls_client_set_unack(&m_clients[1], &set_params,
-                                                    &transition_params, APP_UNACK_MSG_REPEAT_COUNT);
+            NRF_LOG_INFO("send data - ack");
+            mesh_main_send_message(&set_params);
+            //(void)access_model_reliable_cancel(m_clients[0].model_handle);
+            //status = rtls_client_set(&m_clients[0], &set_params, NULL);
+
+            break;
+        default:
             break;
     }
 
@@ -343,7 +325,9 @@ void mesh_main_button_event_handler(uint32_t button_number)
         case NRF_ERROR_NO_MEM:
         case NRF_ERROR_BUSY:
         case NRF_ERROR_INVALID_STATE:
-            NRF_LOG_INFO("Client %u cannot send\n", button_number);
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Client %u cannot send\n", button_number);
+            // TODO: светодиод для донгла
+            //hal_led_blink_ms(LEDS_MASK, LED_BLINK_SHORT_INTERVAL_MS, LED_BLINK_CNT_NO_REPLY);
             break;
 
         case NRF_ERROR_INVALID_PARAM:
@@ -354,7 +338,7 @@ void mesh_main_button_event_handler(uint32_t button_number)
              * It is the provisioner that adds an application key, binds it to the model and sets
              * the model's publication state.
              */
-            NRF_LOG_INFO("Publication not configured for client %u\n", button_number);
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Publication not configured for client %u\n", button_number);
             break;
 
         default:

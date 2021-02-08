@@ -213,7 +213,7 @@ static void scan_start(void)
  * @param[in]   p_data	    Данные для отправки.
  * @param[in]   data_len    Длина данных.
  */
-static void ble_nus_wr4119_send_command(uint8_t * p_data, uint16_t data_len)
+static void ble_nus_wr4119_send_command(const uint8_t * p_data, uint16_t data_len)
 {
     ret_code_t ret_val;
 
@@ -621,6 +621,16 @@ static void sst_handler(void * p_context)
             ble_nus_wr4119_send_command(wr4119_cmd_pressure_start, WR4119_CMD_LENGHT);
             err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_MEASURE_TIME), NULL);
             APP_ERROR_CHECK(err_code);
+
+            if ( app_db_read( &device ) )
+            {
+                // данные получены, отправляю в меш
+                set_params.pulse = device.smartband_data[0];
+                set_params.type = RTLS_PULSE_TYPE;
+                
+                NRF_LOG_INFO("pulse      %02x", set_params.pulse);
+                mesh_main_send_message(&set_params);
+            }
             break;
         }
         case SST_PRESSURE_MEASURE_START:
@@ -640,26 +650,12 @@ static void sst_handler(void * p_context)
             if ( app_db_read( &device ) )
             {
                 // данные получены, отправляю в меш
-                set_params.rssi = device.rssi; // FIXME: unused rssi
-                set_params.smartband_id[0] = device.smartband_id[0];
-                set_params.smartband_id[1] = device.smartband_id[1];
-                set_params.smartband_id[2] = device.smartband_id[2];
-                set_params.smartband_id[3] = device.smartband_id[3];
-                set_params.smartband_id[4] = device.smartband_id[4];
-                set_params.smartband_id[5] = device.smartband_id[5];
+                set_params.pressure.pressure_down = device.smartband_data[1];
+                set_params.pressure.pressure_up = device.smartband_data[2];
+                set_params.type = RTLS_PRESSURE_TYPE;
 
-                set_params.smartband_data[0] = device.smartband_data[0];
-                set_params.smartband_data[1] = device.smartband_data[1];
-                set_params.smartband_data[2] = device.smartband_data[2];
-                
-                for (int i=0; i<6; i++)
-                {
-                    NRF_LOG_INFO("id %02x", set_params.smartband_id[i]);
-                }
-                for (int i=0; i<3; i++)
-                {
-                    NRF_LOG_INFO("data %02x", set_params.smartband_data[i]);
-                }
+                NRF_LOG_INFO("pressure d %02x", set_params.pressure.pressure_down);
+                NRF_LOG_INFO("pressure u %02x", set_params.pressure.pressure_up);
                 mesh_main_send_message(&set_params);
             }
             break;
@@ -866,15 +862,15 @@ int main(void)
     mesh_main_initialize();
     
     // Start execution.
-    NRF_LOG_INFO("Everything inited. Program started");
+    NRF_LOG_INFO("[main] initialization completed");
     NRF_LOG_FLUSH();
 
     scan_start();
     mesh_main_start();
 
     //for test
-    rtls_set_params_t set_params;
-    set_params.rssi = 0x69;
+    //rtls_set_params_t set_params;
+    //msg_params->rssi.rssi = 0x69;
     //mesh_main_send_message(&set_params);
 
     // Enter main loop.
