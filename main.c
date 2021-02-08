@@ -277,7 +277,7 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
             // nus commands
             ble_nus_wr4119_send_command(wr4119_cmd_pulse_start, WR4119_CMD_LENGHT);
             sst_context = SST_PULSE_MEASURE_START;
-            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(10000), NULL);//10 секунд для дебага
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_MEASURE_TIME), NULL);
             APP_ERROR_CHECK(err_code);
             break;
 
