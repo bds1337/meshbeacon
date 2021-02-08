@@ -300,6 +300,16 @@ void mesh_main_button_event_handler(uint32_t button_number)
             break;
     }
 
+    NRF_LOG_INFO("id %02x", set_params.smartband_id[0]);
+    NRF_LOG_INFO("id %02x", set_params.smartband_id[1]);
+    NRF_LOG_INFO("id %02x", set_params.smartband_id[2]);
+    NRF_LOG_INFO("id %02x", set_params.smartband_id[3]);
+    NRF_LOG_INFO("id %02x", set_params.smartband_id[4]);
+    NRF_LOG_INFO("id %02x", set_params.smartband_id[5]);
+    NRF_LOG_INFO("data %02x", set_params.smartband_data[0]);
+    NRF_LOG_INFO("data %02x", set_params.smartband_data[1]);
+    NRF_LOG_INFO("data %02x", set_params.smartband_data[2]);
+
     set_params.tid = tid++;
     transition_params.delay_ms = APP_ONOFF_DELAY_MS;
     transition_params.transition_time_ms = APP_ONOFF_TRANSITION_TIME_MS;
@@ -308,6 +318,7 @@ void mesh_main_button_event_handler(uint32_t button_number)
     {
         case 1:
         case 2:
+            NRF_LOG_INFO("SEND ACK (1-2)");
             /* Demonstrate acknowledged transaction, using 1st client model instance */
             /* In this examples, users will not be blocked if the model is busy */
             mesh_main_send_message(&set_params);
@@ -317,6 +328,7 @@ void mesh_main_button_event_handler(uint32_t button_number)
 
         case 3:
         case 4:
+            NRF_LOG_INFO("SEND UNACK (3-4)");
             /* Demonstrate un-acknowledged transaction, using 2nd client model instance */
             status = rtls_client_set_unack(&m_clients[1], &set_params,
                                                     &transition_params, APP_UNACK_MSG_REPEAT_COUNT);

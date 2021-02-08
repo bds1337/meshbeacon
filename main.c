@@ -36,6 +36,7 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
+
 /** @file
  *
  * @defgroup ble_sdk_uart_over_ble_main main.c
@@ -47,6 +48,9 @@
  * This application uses the @ref srvlib_conn_params module.
  */
 
+/*
+ * для прошивки донгла используй BOARD_PCA10059 вместо BOARD_PCA1005
+ */
 
 #include <stdint.h>
 #include <string.h>
@@ -70,7 +74,8 @@
 #include "ble_nus_c.h" //!
 //#include "app_uart.h"
 #include "app_util_platform.h"
-//#include "bsp_btn_ble.h" // dongle has no buttons (i guess)
+//#include "bsp.h"
+#include "bsp_btn_ble.h" // dongle has no buttons (i guess)
 #include "nrf_pwr_mgmt.h"
 #include "mesh_main.h"
 #include "mesh_app_utils.h"
@@ -81,13 +86,12 @@
 
 #include "app_db.h"
 
-#define APP_BLE_CONN_CFG_TAG            1                                           /**< A tag identifying the SoftDevice BLE configuration. */
+#define APP_BLE_CONN_CFG_TAG        1                                   /**< A tag identifying the SoftDevice BLE configuration. */
 #define APP_BLE_OBSERVER_PRIO       3                                   /**< BLE observer priority of the application. There is no need to modify this value. */
 #define APP_SOC_OBSERVER_PRIO       1                                   /**< SoC observer priority of the application. There is no need to modify this value. */
 
 
-#define DEVICE_NAME                     "Nordic_UART"                               /**< Name of device. Will be included in the advertising data. */
-#define NUS_SERVICE_UUID_TYPE           BLE_UUID_TYPE_VENDOR_BEGIN                  /**< UUID type for the Nordic UART Service (vendor specific). */
+#define DEVICE_NAME                     "Dongle_726"                        /**< Name of device. Will be included in the advertising data. */
 
 #define SCAN_INTERVAL                   0x00A0                              /**< Determines scan interval in units of 0.625 millisecond. */
 #define SCAN_WINDOW                     0x0050                              /**< Determines scan window in units of 0.625 millisecond. */
@@ -104,11 +108,12 @@
 #define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000)                      /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
 #define MAX_CONN_PARAMS_UPDATE_COUNT    3                                           /**< Number of attempts before giving up the connection parameter negotiation. */
 
-#define DEAD_BEEF                       0xDEADBEEF                                  /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
-
-#define UART_TX_BUF_SIZE                256                                         /**< UART TX buffer size. */
-#define UART_RX_BUF_SIZE                256                                         /**< UART RX buffer size. */
-
+#define SST_DISCONNECTED                0
+#define SST_PULSE_MEASURE_START         1
+#define SST_PULSE_MEASURE_STOP          2
+#define SST_PRESSURE_MEASURE_START      3
+#define SST_PRESSURE_MEASURE_STOP       4
+#define SST_IDLE                        5
 
 //BLE_NUS_DEF(m_nus, NRF_SDH_BLE_TOTAL_LINK_COUNT);                                   /**< BLE NUS service instance. */
 BLE_NUS_C_DEF(m_ble_nus_c);                                             /**< BLE Nordic UART Service (NUS) client instance. */
@@ -119,11 +124,11 @@ NRF_BLE_GQ_DEF(m_ble_gatt_queue,                                        /**< BLE
                NRF_SDH_BLE_CENTRAL_LINK_COUNT,
                NRF_BLE_GQ_QUEUE_SIZE);
 
-APP_TIMER_DEF(m_single_shot_timer_id); // таймер между командами измерения давления/пульса
+APP_TIMER_DEF(m_sst_id); // таймер между командами измерения давления и пульса
 
-static bool m_whitelist_disabled;          /**< True if the whitelist is temporarily disabled. */
-
-
+#define WR4119_MEASURE_TIME                 10000 // 10 sec
+#define WR4119_SENDCMD_TIME                 100 
+#define WR4119_IDLE_TIME                    10000
 // Команды для измерения пульса и давления 
 #define WR4119_CMD_LENGHT               0x0007 //12
 static const uint8_t wr4119_cmd_pulse_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x01 }; 
@@ -132,33 +137,18 @@ static const uint8_t wr4119_cmd_pressure_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x
 static const uint8_t wr4119_cmd_pressure_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x00 };
 static const uint8_t wr4119_cmd_recv_type[5] = { 0xAB, 0x00, 0x05, 0xFF, 0x31 };
 
-static int COUNTER_TEST;
-
 static ble_gap_addr_t nus_addr_connhandle[NRF_SDH_BLE_TOTAL_LINK_COUNT];
 
 static uint16_t   m_conn_handle          = BLE_CONN_HANDLE_INVALID;                 /**< Handle of the current connection. */
-//static uint16_t   m_ble_nus_max_data_len = BLE_GATT_ATT_MTU_DEFAULT - 3;            /**< Maximum length of data (in bytes) that can be transmitted to the peer by the Nordic UART service module. */
-
 static uint16_t m_ble_nus_max_data_len = BLE_GATT_ATT_MTU_DEFAULT - OPCODE_LENGTH - HANDLE_LENGTH; /**< Maximum length of data (in bytes) that can be transmitted to the peer by the Nordic UART service module. */
+static uint8_t sst_context  = SST_DISCONNECTED;
+static bool is_connected = false;
 
-/**@brief NUS UUID. */
-static ble_uuid_t const m_nus_uuid =
-{
-    .uuid = BLE_UUID_NUS_SERVICE,
-    .type = NUS_SERVICE_UUID_TYPE
-};
-
-
-// wr41 addrs
-// E2:7A:50:BF:04:FA // Eugene wr41
-// c9 91 a1 32 8d bc 
-//{0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} (little-endian)
 /**< conn addr */
 static ble_gap_addr_t m_target_periph_addr =
 {
     .addr_type = BLE_GAP_ADDR_TYPE_RANDOM_STATIC,
     .addr      = {0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} // reversed from nrf connect (little-endian)
-    //.addr      = {0xEF, 0xCC, 0x8F, 0xF8, 0x87, 0x50} // reversed from nrf connect (little-endian)
 };
 
 /**< Scan parameters requested for scanning and connection. */
@@ -178,6 +168,7 @@ static ble_gap_scan_params_t m_scan_param =
 };
 
 static bool m_memory_access_in_progress;
+static bsp_indication_t led_state;
 
 
 
@@ -194,7 +185,7 @@ static bool m_memory_access_in_progress;
  */
 void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
 {
-    app_error_handler(DEAD_BEEF, line_num, p_file_name);
+    app_error_handler(0xDEADBEEF, line_num, p_file_name);
 }
 
 /**@brief Function for handling the Nordic UART Service Client errors.
@@ -228,21 +219,18 @@ static void ble_nus_wr4119_send_command(uint8_t * p_data, uint16_t data_len)
 
     NRF_LOG_INFO("Sending data:");
     NRF_LOG_RAW_HEXDUMP_INFO(p_data, data_len);
-    
-    for (uint32_t i = 0; i< NRF_SDH_BLE_CENTRAL_LINK_COUNT; i++)
+
+    do
     {
-        do
+        ret_val = ble_nus_c_string_send(&m_ble_nus_c, p_data, data_len);
+        // NOTE: Игнорим (<warning> ble_nus_c: Connection handle invalid.)
+        // Оно возникает потому что не все 8 браслетов подключено
+        if ((ret_val != NRF_SUCCESS) && (ret_val != NRF_ERROR_BUSY) && (ret_val != NRF_ERROR_INVALID_STATE))
         {
-            ret_val = ble_nus_c_string_send(&m_ble_nus_c, p_data, data_len);
-            // NOTE: Игнорим (<warning> ble_nus_c: Connection handle invalid.)
-            // Оно возникает потому что не все 8 браслетов подключено
-            if ((ret_val != NRF_SUCCESS) && (ret_val != NRF_ERROR_BUSY) && (ret_val != NRF_ERROR_INVALID_STATE))
-            {
-                NRF_LOG_ERROR("Failed sending NUS message. Error 0x%x. ", ret_val);
-                APP_ERROR_CHECK(ret_val);
-            }
-        } while (ret_val == NRF_ERROR_BUSY);
-    }
+            NRF_LOG_ERROR("Failed sending NUS message. Error 0x%x. ", ret_val);
+            APP_ERROR_CHECK(ret_val);
+        }
+    } while (ret_val == NRF_ERROR_BUSY);
 }
 
 /**@brief Function for handling Queued Write Module errors.
@@ -285,13 +273,11 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
             NRF_LOG_INFO("Connected to device with Nordic UART Service.");
 
             ble_gap_addr_t ble_addr;
-            //err_code = sd_ble_gap_addr_get(&ble_addr);
-            //NRF_LOG_INFO("addr 0x%02x:%02x\n", ble_addr.addr[0],ble_addr.addr[1]);
-            //APP_ERROR_CHECK(err_code);
 
             // nus commands
             ble_nus_wr4119_send_command(wr4119_cmd_pulse_start, WR4119_CMD_LENGHT);
-            err_code = app_timer_start(m_single_shot_timer_id, APP_TIMER_TICKS(10000), NULL); //10 секунд для дебага
+            sst_context = SST_PULSE_MEASURE_START;
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(10000), NULL);//10 секунд для дебага
             APP_ERROR_CHECK(err_code);
             break;
 
@@ -465,6 +451,8 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             APP_ERROR_CHECK(err_code);
 
 
+            is_connected = true;
+            //err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
             //err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
             //APP_ERROR_CHECK(err_code);
             //m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
@@ -476,6 +464,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             NRF_LOG_INFO("LBS central link 0x%x disconnected (reason: 0x%x)",
                          p_gap_evt->conn_handle,
                          p_gap_evt->params.disconnected.reason);
+            is_connected = false;
             break;
 
         case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
@@ -522,14 +511,12 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                                              BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
             APP_ERROR_CHECK(err_code);
             break;
-        
         case BLE_GAP_EVT_ADV_REPORT:
         {
             NRF_LOG_RAW_HEXDUMP_INFO (m_scan.scan_buffer.p_data, m_scan.scan_buffer.len);
             //NRF_LOG_RAW_INFO ("RSSI: %d\r\n", p_ble_evt->params.adv_report.rssi); // TODO: fix rssi report
             //NRF_LOG_RAW_INFO ("\r\n");
         } break;
-
         default:
             // No implementation needed.
             break;
@@ -592,34 +579,12 @@ static void scan_evt_handler(scan_evt_t const * p_scan_evt)
                       p_connected->peer_addr.addr[5]
                       );
          } break;
-        /*
-        case NRF_BLE_SCAN_EVT_WHITELIST_ADV_REPORT:
-        {
-            //NRF_LOG_INFO("NRF_BLE_SCAN_EVT_WHITELIST_ADV_REPORT");
-            //NRF_LOG_HEXDUMP_INFO(p_scan_evt->params.p_whitelist_adv_report, sizeof(p_scan_evt->params.p_whitelist_adv_report));
-            COUNTER_TEST++;
-            NRF_LOG_INFO("%d, %d", COUNTER_TEST, p_scan_evt->params.p_whitelist_adv_report->rssi);
-            
-            db_t device;
-            device.rssi = p_scan_evt->params.p_whitelist_adv_report->rssi;
-           
-            NRF_LOG_INFO("addr:");
-            for ( int j = 0 ; j < 6; j++ )
-            {
-                NRF_LOG_INFO("%02x", p_scan_evt->params.p_whitelist_adv_report->peer_addr.addr[j]);
-                device.smartband_id[j] = p_scan_evt->params.p_whitelist_adv_report->peer_addr.addr[j];
-            } 
-            app_db_add(&device);
-            
-
-        } break;
-        */
+       
         case NRF_BLE_SCAN_EVT_SCAN_TIMEOUT:
         {
             NRF_LOG_INFO("Scan timed out.");
             scan_start();
-        } break;
-
+        } break; 
         default:
           break;
     }
@@ -627,21 +592,91 @@ static void scan_evt_handler(scan_evt_t const * p_scan_evt)
 
 /**@brief Timeout handler
  */
-static void single_shot_timer_handler(void * p_context)
+static void sst_handler(void * p_context)
 {
+    db_t device;
+    rtls_set_params_t set_params;
+    
     ret_code_t err_code;
-    NRF_LOG_INFO("STOP PULSE MEASURE.");
-    ble_nus_wr4119_send_command(wr4119_cmd_pulse_stop, WR4119_CMD_LENGHT);
-}
+    NRF_LOG_INFO("SST: %d", sst_context);
+    if (!is_connected)
+    {
+        NRF_LOG_INFO("device disconnected");
+        sst_context = SST_DISCONNECTED;
+        return;
+    }
+    switch(sst_context)
+    {
+        case SST_PULSE_MEASURE_START:
+        {
+            sst_context = SST_PULSE_MEASURE_STOP;
+            ble_nus_wr4119_send_command(wr4119_cmd_pulse_stop, WR4119_CMD_LENGHT);
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_SENDCMD_TIME), NULL); 
+            APP_ERROR_CHECK(err_code);
+            break;
+        }
+        case SST_PULSE_MEASURE_STOP:
+        {
+            sst_context = SST_PRESSURE_MEASURE_START;
+            ble_nus_wr4119_send_command(wr4119_cmd_pressure_start, WR4119_CMD_LENGHT);
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_MEASURE_TIME), NULL);
+            APP_ERROR_CHECK(err_code);
+            break;
+        }
+        case SST_PRESSURE_MEASURE_START:
+        {
+            sst_context = SST_PRESSURE_MEASURE_STOP;
+            ble_nus_wr4119_send_command(wr4119_cmd_pressure_stop, WR4119_CMD_LENGHT);
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_SENDCMD_TIME), NULL);
+            APP_ERROR_CHECK(err_code);
+            break;
+        }
+        case SST_PRESSURE_MEASURE_STOP:
+        {
+            sst_context = SST_IDLE;
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_IDLE_TIME), NULL); 
+            APP_ERROR_CHECK(err_code);
 
-static void start_health_measure_handler(void * p_context)
-{
-    ret_code_t err_code;
-    NRF_LOG_INFO("START PULSE MEASURE.");
-    ble_nus_wr4119_send_command(wr4119_cmd_pulse_start, WR4119_CMD_LENGHT);
-    err_code = app_timer_start(m_single_shot_timer_id, APP_TIMER_TICKS(10000), NULL); //10 секунд для дебага
-    APP_ERROR_CHECK(err_code);
-    //ble_nus_wr4119_send_command(wr4119_cmd_pulse_stop, WR4119_CMD_LENGHT);
+            if ( app_db_read( &device ) )
+            {
+                // данные получены, отправляю в меш
+                set_params.rssi = device.rssi; // FIXME: unused rssi
+                set_params.smartband_id[0] = device.smartband_id[0];
+                set_params.smartband_id[1] = device.smartband_id[1];
+                set_params.smartband_id[2] = device.smartband_id[2];
+                set_params.smartband_id[3] = device.smartband_id[3];
+                set_params.smartband_id[4] = device.smartband_id[4];
+                set_params.smartband_id[5] = device.smartband_id[5];
+
+                set_params.smartband_data[0] = device.smartband_data[0];
+                set_params.smartband_data[1] = device.smartband_data[1];
+                set_params.smartband_data[2] = device.smartband_data[2];
+                
+                for (int i=0; i<6; i++)
+                {
+                    NRF_LOG_INFO("id %02x", set_params.smartband_id[i]);
+                }
+                for (int i=0; i<3; i++)
+                {
+                    NRF_LOG_INFO("data %02x", set_params.smartband_data[i]);
+                }
+                mesh_main_send_message(&set_params);
+            }
+            break;
+        }
+        case SST_IDLE:
+        {
+            sst_context = SST_PULSE_MEASURE_START;
+            ble_nus_wr4119_send_command(wr4119_cmd_pulse_start, WR4119_CMD_LENGHT);
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_MEASURE_TIME), NULL); 
+            APP_ERROR_CHECK(err_code);
+            break;
+        }
+        default: 
+            break;
+    }
+
+//    ble_nus_wr4119_send_command(wr4119_cmd_pulse_stop, WR4119_CMD_LENGHT);
 }
 
 /**@brief Function for handling events from the GATT library. */
@@ -652,7 +687,7 @@ void gatt_evt_handler(nrf_ble_gatt_t * p_gatt, nrf_ble_gatt_evt_t const * p_evt)
         NRF_LOG_INFO("ATT MTU exchange completed.");
 
         m_ble_nus_max_data_len = p_evt->params.att_mtu_effective - OPCODE_LENGTH - HANDLE_LENGTH;
-        NRF_LOG_INFO("Ble NUS max data length set to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
+        NRF_LOG_INFO("Ble NUS max data length set //to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
     }
 }
 
@@ -676,8 +711,7 @@ void gatt_init(void)
 static void log_init(void)
 {
     ret_code_t err_code = NRF_LOG_INIT(NULL);
-    APP_ERROR_CHECK(err_code);
-
+    APP_ERROR_CHECK(err_code); 
     NRF_LOG_DEFAULT_BACKENDS_INIT();
 }
 
@@ -716,9 +750,9 @@ static void timers_init(void)
     ret_code_t err_code = app_timer_init();
     APP_ERROR_CHECK(err_code);
 
-    err_code = app_timer_create(&m_single_shot_timer_id,
+    err_code = app_timer_create(&m_sst_id,
                                 APP_TIMER_MODE_SINGLE_SHOT,
-                                single_shot_timer_handler);
+                                sst_handler);
     APP_ERROR_CHECK(err_code);
 }
 
@@ -750,7 +784,7 @@ static void scan_init(bool is_conn)
    
     err_code = nrf_ble_scan_filter_set(&m_scan, SCAN_ADDR_FILTER, m_target_periph_addr.addr);
     APP_ERROR_CHECK(err_code);
-
+    
     err_code = nrf_ble_scan_filters_enable(&m_scan,
                                            NRF_BLE_SCAN_ADDR_FILTER,
                                            false);
@@ -768,17 +802,58 @@ static void idle_state_handle(void)
     nrf_pwr_mgmt_run();
 }
 
+void bsp_event_handler(bsp_event_t event)
+{
+    switch(event)
+    {
+        case BSP_EVENT_KEY_0:
+        case BSP_EVENT_KEY_1:
+        case BSP_EVENT_KEY_2:
+        case BSP_EVENT_KEY_3:
+            mesh_main_button_event_handler(event-BSP_EVENT_KEY_0);
+            break;
+        default:
+            break;
+    }
+    // BSP_INDICATE_IDLE
+    if (led_state == BSP_INDICATE_IDLE)
+    {
+        led_state = BSP_INDICATE_CONNECTED;
+    }
+    else
+    {
+        led_state = BSP_INDICATE_IDLE;
+    }
+    uint32_t err_code = bsp_indication_set(led_state);
+    APP_ERROR_CHECK(err_code);
+}
+
+static void buttons_leds_init()
+{
+    bsp_event_t startup_event;
+    uint32_t err_code = bsp_init(BSP_INIT_LEDS | BSP_INIT_BUTTONS, bsp_event_handler);
+    APP_ERROR_CHECK(err_code);
+    
+    err_code = bsp_btn_ble_init(NULL, &startup_event);
+    APP_ERROR_CHECK(err_code);
+
+    //err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
+    //APP_ERROR_CHECK(err_code);
+    led_state = BSP_INDICATE_IDLE;
+    //*p_erase_bonds = (startup_event == BSP_EVENT_CLEAR_BONDING_DATA);
+}
+
 
 /**@brief Application main function.
  */
 int main(void)
 {
-    bool erase_bonds; // ram_start 0x20002a38
+    //bool erase_bonds; // ram_start 0x20002a38
 
     // Initialize.
     log_init();
     timers_init();
-//    buttons_leds_init(&erase_bonds);
+    buttons_leds_init();
     db_discovery_init();
     power_management_init();
     ble_stack_init();
@@ -791,7 +866,7 @@ int main(void)
     mesh_main_initialize();
     
     // Start execution.
-    NRF_LOG_INFO("Debug logging for UART over RTT started.");
+    NRF_LOG_INFO("Everything inited. Program started");
     NRF_LOG_FLUSH();
 
     scan_start();

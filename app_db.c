@@ -19,7 +19,7 @@
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
 
-#define  DB_DEVICES_SIZE 20
+#define  DB_DEVICES_SIZE 1
 
 static db_t db_devices[DB_DEVICES_SIZE];
 static uint8_t db_lenght;
