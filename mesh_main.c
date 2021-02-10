@@ -101,7 +101,7 @@ static void app_gen_onoff_client_transaction_status_cb(access_model_handle_t mod
 /*****************************************************************************
  * Static variables
  *****************************************************************************/
-static rtls_client_t          m_clients[1]; //CLIENT_MODEL_INSTANCE_COUNT
+static rtls_client_t          m_clients[CLIENT_MODEL_INSTANCE_COUNT]; //CLIENT_MODEL_INSTANCE_COUNT
 static bool                   m_device_provisioned;
 
 const rtls_client_callbacks_t client_cbs =
@@ -298,7 +298,8 @@ void mesh_main_button_event_handler(uint32_t button_number)
         case 1:
         case 2:
             NRF_LOG_INFO("send data - unack");
-            status = rtls_client_set_unack(&m_clients[0], &set_params, NULL, 2);
+            status = rtls_client_set_unack(&m_clients[1], &set_params,
+                                                    NULL, APP_UNACK_MSG_REPEAT_COUNT);
             //hal_led_blink_ms(BSP_LED_3, 200, 2); // TODO: блинк светодиодом донгола
             break;
 
@@ -348,11 +349,15 @@ static void models_init_cb(void)
 {
     NRF_LOG_INFO("Initializing and adding models\n");
 
-    m_clients[0].settings.p_callbacks = &client_cbs;
-    m_clients[0].settings.timeout = 0;
-    m_clients[0].settings.force_segmented = APP_FORCE_SEGMENTATION;
-    m_clients[0].settings.transmic_size = APP_MIC_SIZE;
-    ERROR_CHECK(rtls_client_init(&m_clients[0], 0));
+    for (uint32_t i = 0; i < CLIENT_MODEL_INSTANCE_COUNT; ++i)
+    {
+        m_clients[i].settings.p_callbacks = &client_cbs;
+        m_clients[i].settings.timeout = 0;
+        m_clients[i].settings.force_segmented = APP_FORCE_SEGMENTATION;
+        m_clients[i].settings.transmic_size = APP_MIC_SIZE;
+
+        ERROR_CHECK(rtls_client_init(&m_clients[i], i + 1));
+    }
 }
 
 void mesh_init(void)

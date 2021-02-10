@@ -126,7 +126,7 @@ NRF_BLE_GQ_DEF(m_ble_gatt_queue,                                        /**< BLE
 
 APP_TIMER_DEF(m_sst_id); // таймер между командами измерения давления и пульса
 
-#define WR4119_MEASURE_TIME                 10000 // 10 sec
+#define WR4119_MEASURE_TIME                 60000 // 10 sec
 #define WR4119_SENDCMD_TIME                 100 
 #define WR4119_IDLE_TIME                    10000
 // Команды для измерения пульса и давления 
@@ -864,7 +864,7 @@ int main(void)
     // Start execution.
     NRF_LOG_INFO("[main] initialization completed");
     NRF_LOG_FLUSH();
-
+    //if (m_device_provisioned)
     scan_start();
     mesh_main_start();
 
