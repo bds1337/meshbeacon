@@ -27,9 +27,10 @@ typedef struct
     bool is_ready; //if data modified
 } db_t; 
 
-ret_code_t app_db_add(db_t * device);
-int8_t app_db_find(uint8_t * smartband_id);
+uint8_t app_db_add(db_t * device);
 bool app_db_read( db_t * dev );
+void app_db_add_pulse( uint8_t data );
+void app_db_add_pressure( uint8_t up, uint8_t down);
 
 #ifdef __cplusplus
 }

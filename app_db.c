@@ -21,92 +21,55 @@
 
 #define  DB_DEVICES_SIZE 1
 
-static db_t db_devices[DB_DEVICES_SIZE];
-static uint8_t db_lenght;
+static db_t db_device;
 
-ret_code_t app_db_add( db_t * device )
+uint8_t app_db_add( db_t * device )
 {
-    ret_code_t ret;
-
-    int8_t index = app_db_find(device->smartband_id);
-    if (index == -1)
+    db_device.rssi = device->rssi;
+    for ( int j = 0 ; j < 6; j++ )
     {
-        if ( db_lenght >= DB_DEVICES_SIZE )
-            return 1;
-        
-        db_devices[db_lenght].rssi = device->rssi;
-        for ( int j = 0 ; j < 6; j++ )
-        {
-            db_devices[db_lenght].smartband_id[j] = device->smartband_id[j];
-        } 
-        for ( int j = 0 ; j < 3; j++ )
-        {
-            db_devices[db_lenght].smartband_data[j] = device->smartband_data[j];
-        } 
-        db_devices[db_lenght].is_ready = true;
-        db_lenght++;
+        db_device.smartband_id[j] = device->smartband_id[j];
     } 
-    else 
+    for ( int j = 0 ; j < 3; j++ )
     {
-        db_devices[index].rssi = device->rssi;
-        for ( int j = 0 ; j < 6; j++ )
-        {
-            db_devices[index].smartband_id[j] = device->smartband_id[j];
-        } 
-        for ( int j = 0 ; j < 3; j++ )
-        {
-            db_devices[index].smartband_data[j] = device->smartband_data[j];
-        } 
-        db_devices[index].is_ready = true;
-    }
+        db_device.smartband_data[j] = device->smartband_data[j];
+    } 
 
-    return NRF_SUCCESS;
+    db_device.is_ready = true;
+    return 0;
+}
+
+void app_db_add_pulse( uint8_t data )
+{
+    db_device.smartband_data[0] = data;
+    db_device.is_ready = true;
+}
+
+void app_db_add_pressure( uint8_t up, uint8_t down)
+{
+    db_device.smartband_data[1] = up;
+    db_device.smartband_data[2] = down;
+    db_device.is_ready = true;
 }
 
 bool app_db_read( db_t * dev )
 {
     bool result = false;
 
-    for ( int i = 0; i<db_lenght; i++ )
+    if ( db_device.is_ready )
     {
-        if ( db_devices[i].is_ready )
-        {
-            result = true;
-            for (int j = 0; j<6; j++ )
-            {
-                dev->smartband_id[j] = db_devices[i].smartband_id[j];
-            }
-            for (int j = 0; j<3; j++ )
-            {
-                dev->smartband_data[j] = db_devices[i].smartband_data[j];
-            }
-            dev->rssi = db_devices[i].rssi;
-            db_devices[i].is_ready = false;
-            break;
-        }
+       result = true;
+       for (int j = 0; j<6; j++ )
+       {
+           dev->smartband_id[j] = db_device.smartband_id[j];
+       }
+       for (int j = 0; j<3; j++ )
+       {
+           dev->smartband_data[j] = db_device.smartband_data[j];
+       }
+       dev->rssi = db_device.rssi;
+       db_device.is_ready = false;
     }
 
     return result;
-}
-
-//ret index
-int8_t app_db_find(uint8_t * smartband_id)
-{
-    bool result = true;
-    for ( int i = 0; i<db_lenght; i++ )
-    {
-        for (int j = 0; j<6; j++ )
-        {
-            if (db_devices[i].smartband_id[j] != smartband_id[j])
-            {
-                result = false;
-                break;
-            } 
-        }
-        if (result == true)
-            return i;
-        result = true;
-    }
-    
-    return -1;
 }

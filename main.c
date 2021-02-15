@@ -137,7 +137,7 @@ static const uint8_t wr4119_cmd_pressure_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x
 static const uint8_t wr4119_cmd_pressure_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x00 };
 static const uint8_t wr4119_cmd_recv_type[5] = { 0xAB, 0x00, 0x05, 0xFF, 0x31 };
 
-static ble_gap_addr_t nus_addr_connhandle[NRF_SDH_BLE_TOTAL_LINK_COUNT];
+static ble_gap_addr_t nus_addr_connhandle;
 
 static uint16_t   m_conn_handle          = BLE_CONN_HANDLE_INVALID;                 /**< Handle of the current connection. */
 static uint16_t m_ble_nus_max_data_len = BLE_GATT_ATT_MTU_DEFAULT - OPCODE_LENGTH - HANDLE_LENGTH; /**< Maximum length of data (in bytes) that can be transmitted to the peer by the Nordic UART service module. */
@@ -259,7 +259,6 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
     ret_code_t err_code;
     bool healthdata;
     uint8_t recived_type;
-    db_t device;
 
     switch (p_ble_nus_evt->evt_type)
     {
@@ -284,16 +283,16 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
         case BLE_NUS_C_EVT_NUS_TX_EVT:
         {
             healthdata = true;
-            NRF_LOG_RAW_HEXDUMP_INFO(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
             
             NRF_LOG_INFO("TX from: %02x%02x%02x%02x%02x%02x", 
-                nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[5],
-                nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[4],
-                nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[3],
-                nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[2],
-                nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[1],
-                nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[0]
+                nus_addr_connhandle.addr[5],
+                nus_addr_connhandle.addr[4],
+                nus_addr_connhandle.addr[3],
+                nus_addr_connhandle.addr[2],
+                nus_addr_connhandle.addr[1],
+                nus_addr_connhandle.addr[0]
             );
+            NRF_LOG_RAW_HEXDUMP_INFO(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
             
 
             if ( p_ble_nus_evt->data_len < 6 )
@@ -310,23 +309,22 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
             }
             if ( healthdata == true )
             {
-                //NRF_LOG_DEBUG("healthdata = true");
+                NRF_LOG_DEBUG("HEALTH");
                 //sd_ble_gap_addr_get
-                recived_type = p_ble_nus_evt->p_data[6];
+                recived_type = p_ble_nus_evt->p_data[5];
+                NRF_LOG_DEBUG("HEALTH type: %x", recived_type);
                 if ( recived_type == 0x09 )
                 {
-                    device.smartband_data[0] = p_ble_nus_evt->p_data[8];
+                    app_db_add_pulse(  p_ble_nus_evt->p_data[6] );
+                    NRF_LOG_DEBUG("HEALTH pulse: %x", p_ble_nus_evt->p_data[6]);
                 }
                 if ( recived_type == 0x21 )
                 {
-                    device.smartband_data[1] = p_ble_nus_evt->p_data[7];
-                    device.smartband_data[2] = p_ble_nus_evt->p_data[8];
+                    app_db_add_pressure( p_ble_nus_evt->p_data[6], p_ble_nus_evt->p_data[7] );
+                    NRF_LOG_DEBUG("HEALTH pres: %x", p_ble_nus_evt->p_data[6]);
+                    NRF_LOG_DEBUG("HEALTH pres: %x", p_ble_nus_evt->p_data[7]);
                 }
-                for ( int j = 0 ; j < 6; j++ )
-                {
-                    device.smartband_id[j] = nus_addr_connhandle[p_ble_nus_evt->conn_handle].addr[j];
-                } 
-                app_db_add(&device);
+                //app_db_add(&device);
             }
             //0x2003FE84
          }  break;
@@ -425,6 +423,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
     switch (p_ble_evt->header.evt_id)
     {
         case BLE_GAP_EVT_CONNECTED:
+        {
             NRF_LOG_INFO("Connection established: %02x", p_gap_evt->conn_handle);
             NRF_LOG_INFO("Connection established: %02x%02x%02x%02x%02x%02x",
                 p_ble_evt->evt.gap_evt.params.connected.peer_addr.addr[0], 
@@ -435,9 +434,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                 p_ble_evt->evt.gap_evt.params.connected.peer_addr.addr[5]
             );
 
-            nus_addr_connhandle[p_gap_evt->conn_handle] = p_ble_evt->evt.gap_evt.params.connected.peer_addr;
-
-            //APP_ERROR_CHECK_BOOL(p_gap_evt->conn_handle < NRF_SDH_BLE_CENTRAL_LINK_COUNT);
+            nus_addr_connhandle = p_ble_evt->evt.gap_evt.params.connected.peer_addr;
 
             err_code = ble_nus_c_handles_assign(&m_ble_nus_c,
                                                 p_gap_evt->conn_handle,
@@ -447,25 +444,18 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 
             err_code = ble_db_discovery_start(&m_db_disc,
                                               p_gap_evt->conn_handle);
-
             APP_ERROR_CHECK(err_code);
 
-
             is_connected = true;
-            //err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
-            //err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
-            //APP_ERROR_CHECK(err_code);
-            //m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
-            //err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
-            //APP_ERROR_CHECK(err_code);
-            break;
+        } break;
 
         case BLE_GAP_EVT_DISCONNECTED:
+        {
             NRF_LOG_INFO("LBS central link 0x%x disconnected (reason: 0x%x)",
                          p_gap_evt->conn_handle,
                          p_gap_evt->params.disconnected.reason);
             is_connected = false;
-            break;
+        } break;
 
         case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
         {
@@ -514,8 +504,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
         case BLE_GAP_EVT_ADV_REPORT:
         {
             NRF_LOG_RAW_HEXDUMP_INFO (m_scan.scan_buffer.p_data, m_scan.scan_buffer.len);
-            //NRF_LOG_RAW_INFO ("RSSI: %d\r\n", p_ble_evt->params.adv_report.rssi); // TODO: fix rssi report
-            //NRF_LOG_RAW_INFO ("\r\n");
+
         } break;
         default:
             // No implementation needed.
@@ -671,8 +660,6 @@ static void sst_handler(void * p_context)
         default: 
             break;
     }
-
-//    ble_nus_wr4119_send_command(wr4119_cmd_pulse_stop, WR4119_CMD_LENGHT);
 }
 
 /**@brief Function for handling events from the GATT library. */
@@ -867,11 +854,6 @@ int main(void)
     //if (m_device_provisioned)
     scan_start();
     mesh_main_start();
-
-    //for test
-    //rtls_set_params_t set_params;
-    //msg_params->rssi.rssi = 0x69;
-    //mesh_main_send_message(&set_params);
 
     // Enter main loop.
     for (;;)
