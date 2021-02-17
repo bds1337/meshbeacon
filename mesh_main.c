@@ -68,7 +68,7 @@
 #include "app_config.h"
 #include "nrf_mesh_config_examples.h"
 #include "example_common.h"
-#include "app_db.h"
+//#include "app_db.h"
 
 /*****************************************************************************
  * Definitions
@@ -256,7 +256,7 @@ void mesh_main_button_event_handler(uint32_t button_number)
     button_number++;
     NRF_LOG_INFO("Button %u pressed\n", button_number);
 
-    db_t device;
+    //db_t device;
     uint32_t status = NRF_SUCCESS;
     rtls_set_params_t set_params;
 

@@ -55,10 +55,8 @@
 #include <stdint.h>
 #include <string.h>
 #include "nordic_common.h"
-//#include "nrf.h"
 #include "ble.h"
 #include "ble_hci.h"
-//#include "ble_advdata.h"
 #include "ble_advertising.h"
 #include "ble_conn_params.h"
 #include "ble_db_discovery.h" //added
@@ -70,12 +68,10 @@
 #include "nrf_ble_scan.h" // added 
 #include "nrf_fstorage.h" //added
 #include "app_timer.h"
-//#include "ble_nus.h"
-#include "ble_nus_c.h" //!
-//#include "app_uart.h"
+#include "ble_nus_c.h"
 #include "app_util_platform.h"
-//#include "bsp.h"
-#include "bsp_btn_ble.h" // dongle has no buttons (i guess)
+
+#include "bsp_btn_ble.h"
 #include "nrf_pwr_mgmt.h"
 #include "mesh_main.h"
 #include "mesh_app_utils.h"
@@ -84,14 +80,9 @@
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
 
-#include "app_db.h"
-
 #define APP_BLE_CONN_CFG_TAG        1                                   /**< A tag identifying the SoftDevice BLE configuration. */
 #define APP_BLE_OBSERVER_PRIO       3                                   /**< BLE observer priority of the application. There is no need to modify this value. */
 #define APP_SOC_OBSERVER_PRIO       1                                   /**< SoC observer priority of the application. There is no need to modify this value. */
-
-
-#define DEVICE_NAME                     "Dongle_726"                        /**< Name of device. Will be included in the advertising data. */
 
 #define SCAN_INTERVAL                   0x00A0                              /**< Determines scan interval in units of 0.625 millisecond. */
 #define SCAN_WINDOW                     0x0050                              /**< Determines scan window in units of 0.625 millisecond. */
@@ -108,14 +99,7 @@
 #define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000)                      /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
 #define MAX_CONN_PARAMS_UPDATE_COUNT    3                                           /**< Number of attempts before giving up the connection parameter negotiation. */
 
-#define SST_DISCONNECTED                0
-#define SST_PULSE_MEASURE_START         1
-#define SST_PULSE_MEASURE_STOP          2
-#define SST_PRESSURE_MEASURE_START      3
-#define SST_PRESSURE_MEASURE_STOP       4
-#define SST_IDLE                        5
 
-//BLE_NUS_DEF(m_nus, NRF_SDH_BLE_TOTAL_LINK_COUNT);                                   /**< BLE NUS service instance. */
 BLE_NUS_C_DEF(m_ble_nus_c);                                             /**< BLE Nordic UART Service (NUS) client instance. */
 BLE_DB_DISCOVERY_DEF(m_db_disc);                                        /**< Database discovery module instance. */
 NRF_BLE_GATT_DEF(m_gatt);                                                           /**< GATT module instance. */
@@ -125,10 +109,17 @@ NRF_BLE_GQ_DEF(m_ble_gatt_queue,                                        /**< BLE
                NRF_BLE_GQ_QUEUE_SIZE);
 
 APP_TIMER_DEF(m_sst_id); // таймер между командами измерения давления и пульса
-
-#define WR4119_MEASURE_TIME                 60000 // 10 sec
-#define WR4119_SENDCMD_TIME                 100 
-#define WR4119_IDLE_TIME                    10000
+//Состояния таймера отпраки данных по мешу
+#define SST_DISCONNECTED                0
+#define SST_PULSE_MEASURE_START         1 
+#define SST_PULSE_MEASURE_STOP          2
+#define SST_PRESSURE_MEASURE_START      3
+#define SST_PRESSURE_MEASURE_STOP       4
+#define SST_IDLE                        5
+//Время ожидания таймера (для проведения измерений и отпраки команд старт/стоп)
+#define SST_MEASURE_TIME                 60000 // 10 sec
+#define SST_SENDCMD_TIME                 100 
+#define SST_IDLE_TIME                    10000
 // Команды для измерения пульса и давления 
 #define WR4119_CMD_LENGHT               0x0007 //12
 static const uint8_t wr4119_cmd_pulse_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x01 }; 
@@ -137,6 +128,24 @@ static const uint8_t wr4119_cmd_pressure_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x
 static const uint8_t wr4119_cmd_pressure_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x00 };
 static const uint8_t wr4119_cmd_recv_type[5] = { 0xAB, 0x00, 0x05, 0xFF, 0x31 };
 
+typedef struct
+{
+	struct
+	{
+            uint8_t pressure_up;
+            uint8_t pressure_down;
+            bool is_ready;
+	} pressure;
+	struct
+	{
+            uint8_t pulse;
+            bool is_ready;
+	} pulse;
+
+} smartband_data_t;
+
+static smartband_data_t smartband_data;
+
 static ble_gap_addr_t nus_addr_connhandle;
 
 static uint16_t   m_conn_handle          = BLE_CONN_HANDLE_INVALID;                 /**< Handle of the current connection. */
@@ -144,11 +153,11 @@ static uint16_t m_ble_nus_max_data_len = BLE_GATT_ATT_MTU_DEFAULT - OPCODE_LENGT
 static uint8_t sst_context  = SST_DISCONNECTED;
 static bool is_connected = false;
 
-/**< conn addr */
+/**< Адрес для подключения к устройсту-браслету */
 static ble_gap_addr_t m_target_periph_addr =
 {
     .addr_type = BLE_GAP_ADDR_TYPE_RANDOM_STATIC,
-    .addr      = {0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} // reversed from nrf connect (little-endian)
+    .addr      = {0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} // reversed from nrf connect
 };
 
 /**< Scan parameters requested for scanning and connection. */
@@ -213,7 +222,7 @@ static void scan_start(void)
  * @param[in]   p_data	    Данные для отправки.
  * @param[in]   data_len    Длина данных.
  */
-static void ble_nus_wr4119_send_command(const uint8_t * p_data, uint16_t data_len)
+static void ble_nus_send(const uint8_t * p_data, uint16_t data_len)
 {
     ret_code_t ret_val;
 
@@ -223,8 +232,6 @@ static void ble_nus_wr4119_send_command(const uint8_t * p_data, uint16_t data_le
     do
     {
         ret_val = ble_nus_c_string_send(&m_ble_nus_c, p_data, data_len);
-        // NOTE: Игнорим (<warning> ble_nus_c: Connection handle invalid.)
-        // Оно возникает потому что не все 8 браслетов подключено
         if ((ret_val != NRF_SUCCESS) && (ret_val != NRF_ERROR_BUSY) && (ret_val != NRF_ERROR_INVALID_STATE))
         {
             NRF_LOG_ERROR("Failed sending NUS message. Error 0x%x. ", ret_val);
@@ -273,10 +280,8 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
 
             ble_gap_addr_t ble_addr;
 
-            // nus commands
-            ble_nus_wr4119_send_command(wr4119_cmd_pulse_start, WR4119_CMD_LENGHT);
             sst_context = SST_PULSE_MEASURE_START;
-            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_MEASURE_TIME), NULL);
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_SENDCMD_TIME), NULL);
             APP_ERROR_CHECK(err_code);
             break;
 
@@ -302,31 +307,28 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
             {
                 if ( wr4119_cmd_recv_type[i] != p_ble_nus_evt->p_data[i] )
                 {
-                    //NRF_LOG_DEBUG("[%d] %02x != %02x\n", i, wr4119_cmd_pulse_start[i], p_ble_nus_evt->p_data[i]);
                     healthdata = false;
                     break;
                 }
             }
             if ( healthdata == true )
             {
-                NRF_LOG_DEBUG("HEALTH");
-                //sd_ble_gap_addr_get
                 recived_type = p_ble_nus_evt->p_data[5];
-                NRF_LOG_DEBUG("HEALTH type: %x", recived_type);
                 if ( recived_type == 0x09 )
                 {
-                    app_db_add_pulse(  p_ble_nus_evt->p_data[6] );
+                    smartband_data.pulse.pulse = p_ble_nus_evt->p_data[6];
+                    smartband_data.pulse.is_ready = true;
                     NRF_LOG_DEBUG("HEALTH pulse: %x", p_ble_nus_evt->p_data[6]);
                 }
                 if ( recived_type == 0x21 )
                 {
-                    app_db_add_pressure( p_ble_nus_evt->p_data[6], p_ble_nus_evt->p_data[7] );
+                    smartband_data.pressure.pressure_up = p_ble_nus_evt->p_data[6];
+                    smartband_data.pressure.pressure_down = p_ble_nus_evt->p_data[7];
+                    smartband_data.pressure.is_ready = true;
                     NRF_LOG_DEBUG("HEALTH pres: %x", p_ble_nus_evt->p_data[6]);
                     NRF_LOG_DEBUG("HEALTH pres: %x", p_ble_nus_evt->p_data[7]);
                 }
-                //app_db_add(&device);
             }
-            //0x2003FE84
          }  break;
 
         case BLE_NUS_C_EVT_DISCONNECTED:
@@ -583,7 +585,7 @@ static void scan_evt_handler(scan_evt_t const * p_scan_evt)
  */
 static void sst_handler(void * p_context)
 {
-    db_t device;
+    //db_t device;
     rtls_set_params_t set_params;
     
     ret_code_t err_code;
@@ -599,64 +601,57 @@ static void sst_handler(void * p_context)
         case SST_PULSE_MEASURE_START:
         {
             sst_context = SST_PULSE_MEASURE_STOP;
-            ble_nus_wr4119_send_command(wr4119_cmd_pulse_stop, WR4119_CMD_LENGHT);
-            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_SENDCMD_TIME), NULL); 
+            ble_nus_send(wr4119_cmd_pulse_start, WR4119_CMD_LENGHT);
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_MEASURE_TIME), NULL); 
             APP_ERROR_CHECK(err_code);
-            break;
-        }
+        } break;
         case SST_PULSE_MEASURE_STOP:
         {
             sst_context = SST_PRESSURE_MEASURE_START;
-            ble_nus_wr4119_send_command(wr4119_cmd_pressure_start, WR4119_CMD_LENGHT);
-            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_MEASURE_TIME), NULL);
+            ble_nus_send(wr4119_cmd_pulse_stop, WR4119_CMD_LENGHT);
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_SENDCMD_TIME), NULL); 
             APP_ERROR_CHECK(err_code);
-
-            if ( app_db_read( &device ) )
-            {
-                // данные получены, отправляю в меш
-                set_params.pulse = device.smartband_data[0];
-                set_params.type = RTLS_PULSE_TYPE;
-                
-                NRF_LOG_INFO("pulse      %02x", set_params.pulse);
-                mesh_main_send_message(&set_params);
-            }
-            break;
-        }
+        } break;
         case SST_PRESSURE_MEASURE_START:
         {
+            if ( smartband_data.pressure.is_ready )
+            {
+                // данные пульса уже получены, отправляю в меш
+                set_params.pressure.pressure_down = smartband_data.pressure.pressure_down;
+                set_params.pressure.pressure_up = smartband_data.pressure.pressure_up;
+                set_params.type = RTLS_PRESSURE_TYPE;
+                smartband_data.pressure.is_ready = false;
+                NRF_LOG_INFO("SEND pressure d %02x", set_params.pressure.pressure_down);
+                NRF_LOG_INFO("SEND pressure u %02x", set_params.pressure.pressure_up);
+                mesh_main_send_message(&set_params);
+            }
             sst_context = SST_PRESSURE_MEASURE_STOP;
-            ble_nus_wr4119_send_command(wr4119_cmd_pressure_stop, WR4119_CMD_LENGHT);
-            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_SENDCMD_TIME), NULL);
+            ble_nus_send(wr4119_cmd_pressure_start, WR4119_CMD_LENGHT);
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_MEASURE_TIME), NULL);
             APP_ERROR_CHECK(err_code);
-            break;
-        }
+        } break;
         case SST_PRESSURE_MEASURE_STOP:
         {
             sst_context = SST_IDLE;
-            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_IDLE_TIME), NULL); 
+            ble_nus_send(wr4119_cmd_pressure_stop, WR4119_CMD_LENGHT);
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_SENDCMD_TIME), NULL);
             APP_ERROR_CHECK(err_code);
-
-            if ( app_db_read( &device ) )
-            {
-                // данные получены, отправляю в меш
-                set_params.pressure.pressure_down = device.smartband_data[1];
-                set_params.pressure.pressure_up = device.smartband_data[2];
-                set_params.type = RTLS_PRESSURE_TYPE;
-
-                NRF_LOG_INFO("pressure d %02x", set_params.pressure.pressure_down);
-                NRF_LOG_INFO("pressure u %02x", set_params.pressure.pressure_up);
-                mesh_main_send_message(&set_params);
-            }
-            break;
-        }
+        } break;
         case SST_IDLE:
         {
+            if ( smartband_data.pulse.is_ready )
+            {
+                // данные получены, отправляю в меш
+                set_params.pulse = smartband_data.pulse.pulse;
+                set_params.type = RTLS_PULSE_TYPE;
+                smartband_data.pulse.is_ready = false;
+                NRF_LOG_INFO("SEND pulse      %02x", set_params.pulse);
+                mesh_main_send_message(&set_params);
+            }
             sst_context = SST_PULSE_MEASURE_START;
-            ble_nus_wr4119_send_command(wr4119_cmd_pulse_start, WR4119_CMD_LENGHT);
-            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(WR4119_MEASURE_TIME), NULL); 
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_IDLE_TIME), NULL); 
             APP_ERROR_CHECK(err_code);
-            break;
-        }
+        } break;
         default: 
             break;
     }
@@ -798,7 +793,6 @@ void bsp_event_handler(bsp_event_t event)
         default:
             break;
     }
-    // BSP_INDICATE_IDLE
     if (led_state == BSP_INDICATE_IDLE)
     {
         led_state = BSP_INDICATE_CONNECTED;
@@ -820,10 +814,8 @@ static void buttons_leds_init()
     err_code = bsp_btn_ble_init(NULL, &startup_event);
     APP_ERROR_CHECK(err_code);
 
-    //err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
-    //APP_ERROR_CHECK(err_code);
     led_state = BSP_INDICATE_IDLE;
-    //*p_erase_bonds = (startup_event == BSP_EVENT_CLEAR_BONDING_DATA);
+
 }
 
 
@@ -831,8 +823,6 @@ static void buttons_leds_init()
  */
 int main(void)
 {
-    //bool erase_bonds; // ram_start 0x20002a38
-
     // Initialize.
     log_init();
     timers_init();
@@ -840,7 +830,6 @@ int main(void)
     db_discovery_init();
     power_management_init();
     ble_stack_init();
-    //gap_params_init();
     gatt_init();
     services_init();
     scan_init(true); // true - ччтобы подключаться
@@ -851,7 +840,7 @@ int main(void)
     // Start execution.
     NRF_LOG_INFO("[main] initialization completed");
     NRF_LOG_FLUSH();
-    //if (m_device_provisioned)
+
     scan_start();
     mesh_main_start();
 
