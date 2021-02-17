@@ -117,16 +117,16 @@ APP_TIMER_DEF(m_sst_id); // таймер между командами изме�
 #define SST_PRESSURE_MEASURE_STOP       4
 #define SST_IDLE                        5
 //Время ожидания таймера (для проведения измерений и отпраки команд старт/стоп)
-#define SST_MEASURE_TIME                 60000 // 10 sec
-#define SST_SENDCMD_TIME                 100 
-#define SST_IDLE_TIME                    10000
+#define SST_MEASURE_TIME                60000
+#define SST_SENDCMD_TIME                2000 
+#define SST_IDLE_TIME                   10000
 // Команды для измерения пульса и давления 
 #define WR4119_CMD_LENGHT               0x0007 //12
-static const uint8_t wr4119_cmd_pulse_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x01 }; 
-static const uint8_t wr4119_cmd_pulse_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x00 };
+static const uint8_t wr4119_cmd_pulse_start[7]    = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x01 }; 
+static const uint8_t wr4119_cmd_pulse_stop[7]     = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x00 };
 static const uint8_t wr4119_cmd_pressure_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x01 };
-static const uint8_t wr4119_cmd_pressure_stop[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x00 };
-static const uint8_t wr4119_cmd_recv_type[5] = { 0xAB, 0x00, 0x05, 0xFF, 0x31 };
+static const uint8_t wr4119_cmd_pressure_stop[7]  = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x00 };
+static const uint8_t wr4119_cmd_recv_type[5]      = { 0xAB, 0x00, 0x05, 0xFF, 0x31 };
 
 typedef struct
 {
@@ -614,15 +614,13 @@ static void sst_handler(void * p_context)
         } break;
         case SST_PRESSURE_MEASURE_START:
         {
-            if ( smartband_data.pressure.is_ready )
+            if ( smartband_data.pulse.is_ready )
             {
                 // данные пульса уже получены, отправляю в меш
-                set_params.pressure.pressure_down = smartband_data.pressure.pressure_down;
-                set_params.pressure.pressure_up = smartband_data.pressure.pressure_up;
-                set_params.type = RTLS_PRESSURE_TYPE;
-                smartband_data.pressure.is_ready = false;
-                NRF_LOG_INFO("SEND pressure d %02x", set_params.pressure.pressure_down);
-                NRF_LOG_INFO("SEND pressure u %02x", set_params.pressure.pressure_up);
+                set_params.pulse = smartband_data.pulse.pulse;
+                set_params.type = RTLS_PULSE_TYPE;
+                smartband_data.pulse.is_ready = false;
+                NRF_LOG_INFO("SEND pulse      %02x", set_params.pulse);
                 mesh_main_send_message(&set_params);
             }
             sst_context = SST_PRESSURE_MEASURE_STOP;
@@ -639,13 +637,15 @@ static void sst_handler(void * p_context)
         } break;
         case SST_IDLE:
         {
-            if ( smartband_data.pulse.is_ready )
+            if ( smartband_data.pressure.is_ready )
             {
                 // данные получены, отправляю в меш
-                set_params.pulse = smartband_data.pulse.pulse;
-                set_params.type = RTLS_PULSE_TYPE;
-                smartband_data.pulse.is_ready = false;
-                NRF_LOG_INFO("SEND pulse      %02x", set_params.pulse);
+                set_params.pressure.pressure_down = smartband_data.pressure.pressure_down;
+                set_params.pressure.pressure_up = smartband_data.pressure.pressure_up;
+                set_params.type = RTLS_PRESSURE_TYPE;
+                smartband_data.pressure.is_ready = false;
+                NRF_LOG_INFO("SEND pressure d %02x", set_params.pressure.pressure_down);
+                NRF_LOG_INFO("SEND pressure u %02x", set_params.pressure.pressure_up);
                 mesh_main_send_message(&set_params);
             }
             sst_context = SST_PULSE_MEASURE_START;
