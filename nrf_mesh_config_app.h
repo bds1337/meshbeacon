@@ -93,8 +93,7 @@
  */
 #define ACCESS_MODEL_COUNT (1 + /* Configuration server */  \
                             1 + /* Health server */  \
-                            2 + /* Generic OnOff client (2 groups) */ \
-                            2   /* Generic OnOff client (2 unicast) */)
+                            2   /* rtls rssi model and rtls model */)
 
 /**
  * The number of elements in the application.
@@ -102,7 +101,7 @@
  * @warning If the application is to support _multiple instances_ of the _same_ model, these instances
  * cannot be in the same element and a separate element is needed for each new instance of the same model.
  */
-#define ACCESS_ELEMENT_COUNT (1 + CLIENT_MODEL_INSTANCE_COUNT) /* One element per Generic OnOff client instance */
+#define ACCESS_ELEMENT_COUNT (1) /* One element per Generic OnOff client instance */
 
 /**
  * The number of allocated subscription lists for the application.
@@ -154,6 +153,8 @@
 #define DSM_NONVIRTUAL_ADDR_MAX                         (ACCESS_MODEL_COUNT + 1)
 /** @} end of DSM_CONFIG */
 
+#define EX_URI_RTLS_BEACON URI_SCHEME_EXAMPLE "URI for RTLS_BEACON example"
+#define EX_URI_RTLS_DONGLE URI_SCHEME_EXAMPLE "URI for RTLS_DONGLE example"
 
 /** @} */
 

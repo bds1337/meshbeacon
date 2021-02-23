@@ -57,16 +57,16 @@
 #include "mesh_app_utils.h"
 
 /* Models */
-//#include "generic_onoff_client.h"
 #include "rtls_client.h"
-//#include "app_rtls.h" //TODO 
+#include "rtls_rssi_client.h"
 
 /* Logging and RTT */
 #include "nrf_log.h"
 
 /* Example specific includes */
 #include "app_config.h"
-#include "nrf_mesh_config_examples.h"
+//#include "nrf_mesh_config_examples.h"
+#include "nrf_mesh_config_app.h"
 #include "example_common.h"
 //#include "app_db.h"
 
@@ -90,25 +90,39 @@
 /*****************************************************************************
  * Forward declaration of static functions
  *****************************************************************************/
-static void app_generic_onoff_client_status_cb(const rtls_client_t * p_self,
-                                               const access_message_rx_meta_t * p_meta,
-                                               const rtls_status_params_t * p_in);
-static void app_gen_onoff_client_transaction_status_cb(access_model_handle_t model_handle,
+static void app_rtls_rssi_client_status_cb(const rtls_rssi_client_t * p_self, 
+                                                        const access_message_rx_meta_t * p_meta);
+static void app_rtls_rssi_client_transaction_status_cb(access_model_handle_t model_handle,
                                                        void * p_args,
                                                        access_reliable_status_t status);
 
+static void app_rtls_client_status_cb(const rtls_client_t * p_self,
+                                               const access_message_rx_meta_t * p_meta,
+                                               const rtls_status_params_t * p_in);
+
+static void app_rtls_client_transaction_status_cb(access_model_handle_t model_handle,
+                                                       void * p_args,
+                                                       access_reliable_status_t status);
 
 /*****************************************************************************
  * Static variables
  *****************************************************************************/
+static rtls_rssi_client_t m_rssi_clients[1];
+const rtls_rssi_client_callbacks_t rssi_client_cbs =
+{
+    .rtls_status_cb = app_rtls_rssi_client_status_cb,
+    .ack_transaction_status_cb = app_rtls_rssi_client_transaction_status_cb
+};
+
 static rtls_client_t          m_clients[CLIENT_MODEL_INSTANCE_COUNT]; //CLIENT_MODEL_INSTANCE_COUNT
 static bool                   m_device_provisioned;
 
 const rtls_client_callbacks_t client_cbs =
 {
-    .rtls_status_cb = app_generic_onoff_client_status_cb,
-    .ack_transaction_status_cb = app_gen_onoff_client_transaction_status_cb
+    .rtls_status_cb = app_rtls_client_status_cb,
+    .ack_transaction_status_cb = app_rtls_client_transaction_status_cb
 };
+
 
 static void mesh_soc_evt_handler(uint32_t evt_id, void * p_context)
 {
@@ -131,32 +145,34 @@ static void provisioning_complete_cb(void)
     unicast_address_print();
 }
 
-/* This callback is called periodically if model is configured for periodic publishing */
-static void app_gen_onoff_client_publish_interval_cb(access_model_handle_t handle, void * p_self)
+/* Client model interface: Process the received status message in this callback */
+static void app_rtls_rssi_client_status_cb(const rtls_rssi_client_t * p_self, 
+                                                        const access_message_rx_meta_t * p_meta)
 {
-    NRF_LOG_WARNING("Publish desired message here.\n");
+    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Data was delivered from 0x%x to 0x%x.\n", p_meta->dst.value, p_meta->src.value);
 }
 
 /* Acknowledged transaction status callback, if acknowledged transfer fails, application can
 * determine suitable course of action (e.g. re-initiate previous transaction) by using this
 * callback.
 */
-static void app_gen_onoff_client_transaction_status_cb(access_model_handle_t model_handle,
+static void app_rtls_rssi_client_transaction_status_cb(access_model_handle_t model_handle,
                                                        void * p_args,
                                                        access_reliable_status_t status)
 {
     switch(status)
     {
         case ACCESS_RELIABLE_TRANSFER_SUCCESS:
-            NRF_LOG_INFO("Acknowledged transfer success.\n");
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Acknowledged transfer success.\n");
             break;
 
         case ACCESS_RELIABLE_TRANSFER_TIMEOUT:
-            NRF_LOG_INFO("Acknowledged transfer timeout.\n");
+            //hal_led_blink_ms(LEDS_MASK, LED_BLINK_SHORT_INTERVAL_MS, LED_BLINK_CNT_NO_REPLY);
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Acknowledged transfer timeout.\n");
             break;
 
         case ACCESS_RELIABLE_TRANSFER_CANCELLED:
-            NRF_LOG_INFO("Acknowledged transfer cancelled.\n");
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Acknowledged transfer cancelled.\n");
             break;
 
         default:
@@ -165,8 +181,7 @@ static void app_gen_onoff_client_transaction_status_cb(access_model_handle_t mod
     }
 }
 
-/* Generic OnOff client model interface: Process the received status message in this callback */
-static void app_generic_onoff_client_status_cb(const rtls_client_t * p_self,
+static void app_rtls_client_status_cb(const rtls_client_t * p_self,
                                                const access_message_rx_meta_t * p_meta,
                                                const rtls_status_params_t * p_in)
 {
@@ -181,8 +196,38 @@ static void app_generic_onoff_client_status_cb(const rtls_client_t * p_self,
     }
     else if (p_in->type == RTLS_RSSI_TYPE)
     {
-        __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: rssi = 0x%x addr = 0x%x to: 0x%x complete.\n", p_in->rssi.rssi,
-                                            p_in->rssi.tag_id, p_meta->src.value);
+        __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: rssi = 0x%x from 0x%x, addr = 0x%x complete.\n", 
+                                            p_in->rssi.rssi, p_meta->src.value,
+                                            p_in->rssi.tag_id);
+    }
+}
+
+/* Acknowledged transaction status callback, if acknowledged transfer fails, application can
+* determine suitable course of action (e.g. re-initiate previous transaction) by using this
+* callback.
+*/
+static void app_rtls_client_transaction_status_cb(access_model_handle_t model_handle,
+                                                       void * p_args,
+                                                       access_reliable_status_t status)
+{
+    switch(status)
+    {
+        case ACCESS_RELIABLE_TRANSFER_SUCCESS:
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Acknowledged transfer success.\n");
+            break;
+
+        case ACCESS_RELIABLE_TRANSFER_TIMEOUT:
+            //hal_led_blink_ms(LEDS_MASK, LED_BLINK_SHORT_INTERVAL_MS, LED_BLINK_CNT_NO_REPLY);
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Acknowledged transfer timeout.\n");
+            break;
+
+        case ACCESS_RELIABLE_TRANSFER_CANCELLED:
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Acknowledged transfer cancelled.\n");
+            break;
+
+        default:
+            ERROR_CHECK(NRF_ERROR_INTERNAL);
+            break;
     }
 }
 
@@ -206,17 +251,11 @@ void mesh_main_send_message(const rtls_set_params_t * msg_params)
     uint32_t status = NRF_SUCCESS;
     static uint8_t tid = 0;
 
-    //rtls_set_params_t * set_params;
     model_transition_t transition_params;
 
-    //msg_params.tid = tid++;
     transition_params.delay_ms = APP_ONOFF_DELAY_MS;
     transition_params.transition_time_ms = APP_ONOFF_TRANSITION_TIME_MS;
-    
-    //set_params = msg_params;
 
-    //__LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Sending msg: RSSI %d\n", set_params.rssi);
-    //NRF_LOG_INFO("Sending msg: RSSI %d\n", msg_params->rssi);
     NRF_LOG_INFO("Sending msg: RSSI %d %02x\n", msg_params->rssi.rssi ,  msg_params->rssi.rssi);
 
     (void)access_model_reliable_cancel(m_clients[0].model_handle);
@@ -349,14 +388,19 @@ static void models_init_cb(void)
 {
     NRF_LOG_INFO("Initializing and adding models\n");
 
-    for (uint32_t i = 0; i < CLIENT_MODEL_INSTANCE_COUNT; ++i)
+    for (uint32_t i = 0; i < 1; ++i)
     {
         m_clients[i].settings.p_callbacks = &client_cbs;
         m_clients[i].settings.timeout = 0;
         m_clients[i].settings.force_segmented = APP_FORCE_SEGMENTATION;
         m_clients[i].settings.transmic_size = APP_MIC_SIZE;
+        ERROR_CHECK(rtls_client_init(&m_clients[i], i));
 
-        ERROR_CHECK(rtls_client_init(&m_clients[i], i + 1));
+        m_rssi_clients[i].settings.p_callbacks = &rssi_client_cbs;
+        m_rssi_clients[i].settings.timeout = 0;
+        m_rssi_clients[i].settings.force_segmented = APP_FORCE_SEGMENTATION;
+        m_rssi_clients[i].settings.transmic_size = APP_MIC_SIZE;
+        ERROR_CHECK(rtls_rssi_client_init(&m_rssi_clients[i], i));
     }
 }
 
@@ -404,7 +448,7 @@ void mesh_main_start(void)
             .prov_device_identification_start_cb = NULL,
             .prov_device_identification_stop_cb = NULL,
             .prov_abort_cb = NULL,
-            .p_device_uri = EX_URI_LS_CLIENT
+            .p_device_uri = EX_URI_RTLS_DONGLE
         };
         ERROR_CHECK(mesh_provisionee_prov_start(&prov_start_params));
     }
