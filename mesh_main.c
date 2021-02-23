@@ -314,11 +314,6 @@ void mesh_main_button_event_handler(uint32_t button_number)
                                             set_params.pressure.pressure_down);
             break;
         case 3:
-            set_params.type = RTLS_RSSI_TYPE;
-            set_params.rssi.rssi = 0xC6;
-            set_params.rssi.tag_id = 0xA6F6;
-            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: rssi = 0x%x addr = 0x%x start.\n", set_params.rssi.rssi,
-                                            set_params.rssi.tag_id);
             break;
         case 4:
             set_params.type = RTLS_RSSI_TYPE;
@@ -343,6 +338,8 @@ void mesh_main_button_event_handler(uint32_t button_number)
             break;
 
         case 3:
+            rtls_rssi_client_set(&m_rssi_clients[0]);
+            break;
         case 4:
             NRF_LOG_INFO("send data - ack");
             mesh_main_send_message(&set_params);

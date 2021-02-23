@@ -157,7 +157,8 @@ static bool is_connected = false;
 static ble_gap_addr_t m_target_periph_addr =
 {
     .addr_type = BLE_GAP_ADDR_TYPE_RANDOM_STATIC,
-    .addr      = {0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} // reversed from nrf connect
+//    .addr      = {0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} // reversed from nrf connect
+    .addr      = {0xFA, 0x04, 0xBF, 0x50, 0x7A, 0xE2}
 };
 
 /**< Scan parameters requested for scanning and connection. */
