@@ -115,7 +115,7 @@ const rtls_rssi_client_callbacks_t rssi_client_cbs =
 };
 
 static rtls_client_t          m_clients[CLIENT_MODEL_INSTANCE_COUNT]; //CLIENT_MODEL_INSTANCE_COUNT
-static bool                   m_device_provisioned;
+bool                   m_device_provisioned;
 
 const rtls_client_callbacks_t client_cbs =
 {

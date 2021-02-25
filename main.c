@@ -66,7 +66,6 @@
 #include "nrf_ble_gatt.h"
 #include "nrf_ble_qwr.h"
 #include "nrf_ble_scan.h" // added 
-#include "nrf_fstorage.h" //added
 #include "app_timer.h"
 #include "ble_nus_c.h"
 #include "app_util_platform.h"
@@ -82,19 +81,11 @@
 
 #define APP_BLE_CONN_CFG_TAG        1                                   /**< A tag identifying the SoftDevice BLE configuration. */
 #define APP_BLE_OBSERVER_PRIO       3                                   /**< BLE observer priority of the application. There is no need to modify this value. */
-#define APP_SOC_OBSERVER_PRIO       1                                   /**< SoC observer priority of the application. There is no need to modify this value. */
 
 #define SCAN_INTERVAL                   0x00A0                              /**< Determines scan interval in units of 0.625 millisecond. */
 #define SCAN_WINDOW                     0x0050                              /**< Determines scan window in units of 0.625 millisecond. */
 #define SCAN_DURATION                   0x0000                              /**< Timout when scanning. 0x0000 disables timeout. */
 
-#define SCHED_MAX_EVENT_DATA_SIZE   1
-#define SCHED_QUEUE_SIZE            10
-
-#define MIN_CONN_INTERVAL               MSEC_TO_UNITS(150,  UNIT_1_25_MS)           /**< Minimum acceptable connection interval. */
-#define MAX_CONN_INTERVAL               MSEC_TO_UNITS(250,  UNIT_1_25_MS)           /**< Maximum acceptable connection interval. */
-#define SLAVE_LATENCY                   0                                           /**< Slave latency. */
-#define CONN_SUP_TIMEOUT                MSEC_TO_UNITS(4000, UNIT_10_MS)             /**< Connection supervisory timeout (4 seconds), Supervision Timeout uses 10 ms units. */
 #define FIRST_CONN_PARAMS_UPDATE_DELAY  APP_TIMER_TICKS(5000)                       /**< Time from initiating event (connect or start of notification) to first time sd_ble_gap_conn_param_update is called (5 seconds). */
 #define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000)                      /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
 #define MAX_CONN_PARAMS_UPDATE_COUNT    3                                           /**< Number of attempts before giving up the connection parameter negotiation. */
@@ -102,13 +93,15 @@
 
 BLE_NUS_C_DEF(m_ble_nus_c);                                             /**< BLE Nordic UART Service (NUS) client instance. */
 BLE_DB_DISCOVERY_DEF(m_db_disc);                                        /**< Database discovery module instance. */
-NRF_BLE_GATT_DEF(m_gatt);                                                           /**< GATT module instance. */
+NRF_BLE_GATT_DEF(m_gatt);                                               /**< GATT module instance. */
 NRF_BLE_SCAN_DEF(m_scan);                                       /**< Scanning module instance. */
 NRF_BLE_GQ_DEF(m_ble_gatt_queue,                                        /**< BLE GATT Queue instance. */
                NRF_SDH_BLE_CENTRAL_LINK_COUNT,
                NRF_BLE_GQ_QUEUE_SIZE);
-
 APP_TIMER_DEF(m_sst_id); // таймер между командами измерения давления и пульса
+
+extern bool m_device_provisioned;
+
 //Состояния таймера отпраки данных по мешу
 #define SST_DISCONNECTED                0
 #define SST_PULSE_MEASURE_START         1 
@@ -130,25 +123,22 @@ static const uint8_t wr4119_cmd_recv_type[5]      = { 0xAB, 0x00, 0x05, 0xFF, 0x
 
 typedef struct
 {
-	struct
-	{
-            uint8_t pressure_up;
-            uint8_t pressure_down;
-            bool is_ready;
-	} pressure;
-	struct
-	{
-            uint8_t pulse;
-            bool is_ready;
-	} pulse;
-
+    struct
+    {
+        uint8_t pressure_up;
+        uint8_t pressure_down;
+        bool is_ready;
+    } pressure;
+    struct
+    {
+        uint8_t pulse;
+        bool is_ready;
+    } pulse;
 } smartband_data_t;
 
 static smartband_data_t smartband_data;
 
-static ble_gap_addr_t nus_addr_connhandle;
-
-static uint16_t   m_conn_handle          = BLE_CONN_HANDLE_INVALID;                 /**< Handle of the current connection. */
+static uint16_t m_conn_handle          = BLE_CONN_HANDLE_INVALID;                 /**< Handle of the current connection. */
 static uint16_t m_ble_nus_max_data_len = BLE_GATT_ATT_MTU_DEFAULT - OPCODE_LENGTH - HANDLE_LENGTH; /**< Maximum length of data (in bytes) that can be transmitted to the peer by the Nordic UART service module. */
 static uint8_t sst_context  = SST_DISCONNECTED;
 static bool is_connected = false;
@@ -157,8 +147,8 @@ static bool is_connected = false;
 static ble_gap_addr_t m_target_periph_addr =
 {
     .addr_type = BLE_GAP_ADDR_TYPE_RANDOM_STATIC,
-//    .addr      = {0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} // reversed from nrf connect
-    .addr      = {0xFA, 0x04, 0xBF, 0x50, 0x7A, 0xE2}
+    .addr      = {0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} // reversed from nrf connect
+//    .addr      = {0xFA, 0x04, 0xBF, 0x50, 0x7A, 0xE2}
 };
 
 /**< Scan parameters requested for scanning and connection. */
@@ -213,6 +203,12 @@ static void scan_start(void)
 {
     ret_code_t err_code;
 
+    if (!m_device_provisioned)
+    {
+        NRF_LOG_INFO("Device not provisioned.");
+        return;
+    }
+
     err_code = nrf_ble_scan_start(&m_scan);
     APP_ERROR_CHECK(err_code);
     NRF_LOG_INFO("Scan start");
@@ -226,9 +222,6 @@ static void scan_start(void)
 static void ble_nus_send(const uint8_t * p_data, uint16_t data_len)
 {
     ret_code_t ret_val;
-
-    NRF_LOG_INFO("Sending data:");
-    NRF_LOG_RAW_HEXDUMP_INFO(p_data, data_len);
 
     do
     {
@@ -278,9 +271,7 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
             err_code = ble_nus_c_tx_notif_enable(p_ble_nus_c);
             APP_ERROR_CHECK(err_code);
             NRF_LOG_INFO("Connected to device with Nordic UART Service.");
-
-            ble_gap_addr_t ble_addr;
-
+            
             sst_context = SST_PULSE_MEASURE_START;
             err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_SENDCMD_TIME), NULL);
             APP_ERROR_CHECK(err_code);
@@ -290,16 +281,7 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
         {
             healthdata = true;
             
-            NRF_LOG_INFO("TX from: %02x%02x%02x%02x%02x%02x", 
-                nus_addr_connhandle.addr[5],
-                nus_addr_connhandle.addr[4],
-                nus_addr_connhandle.addr[3],
-                nus_addr_connhandle.addr[2],
-                nus_addr_connhandle.addr[1],
-                nus_addr_connhandle.addr[0]
-            );
-            NRF_LOG_RAW_HEXDUMP_INFO(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
-            
+            //NRF_LOG_RAW_HEXDUMP_INFO(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
 
             if ( p_ble_nus_evt->data_len < 6 )
                 return;            
@@ -319,15 +301,15 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
                 {
                     smartband_data.pulse.pulse = p_ble_nus_evt->p_data[6];
                     smartband_data.pulse.is_ready = true;
-                    NRF_LOG_DEBUG("HEALTH pulse: %x", p_ble_nus_evt->p_data[6]);
+                    NRF_LOG_DEBUG("GOT pulse: %x", p_ble_nus_evt->p_data[6]);
                 }
                 if ( recived_type == 0x21 )
                 {
                     smartband_data.pressure.pressure_up = p_ble_nus_evt->p_data[6];
                     smartband_data.pressure.pressure_down = p_ble_nus_evt->p_data[7];
                     smartband_data.pressure.is_ready = true;
-                    NRF_LOG_DEBUG("HEALTH pres: %x", p_ble_nus_evt->p_data[6]);
-                    NRF_LOG_DEBUG("HEALTH pres: %x", p_ble_nus_evt->p_data[7]);
+                    NRF_LOG_DEBUG("GOT pressure: %x", p_ble_nus_evt->p_data[6]);
+                    NRF_LOG_DEBUG("GOT pressure: %x", p_ble_nus_evt->p_data[7]);
                 }
             }
          }  break;
@@ -437,8 +419,6 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                 p_ble_evt->evt.gap_evt.params.connected.peer_addr.addr[5]
             );
 
-            nus_addr_connhandle = p_ble_evt->evt.gap_evt.params.connected.peer_addr;
-
             err_code = ble_nus_c_handles_assign(&m_ble_nus_c,
                                                 p_gap_evt->conn_handle,
                                                 NULL);
@@ -450,6 +430,9 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             APP_ERROR_CHECK(err_code);
 
             is_connected = true;
+            err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
+            APP_ERROR_CHECK(err_code);
+
         } break;
 
         case BLE_GAP_EVT_DISCONNECTED:
@@ -457,6 +440,8 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             NRF_LOG_INFO("LBS central link 0x%x disconnected (reason: 0x%x)",
                          p_gap_evt->conn_handle,
                          p_gap_evt->params.disconnected.reason);
+            err_code = bsp_indication_set(BSP_INDICATE_IDLE);
+            APP_ERROR_CHECK(err_code);
             is_connected = false;
         } break;
 
@@ -586,7 +571,6 @@ static void scan_evt_handler(scan_evt_t const * p_scan_evt)
  */
 static void sst_handler(void * p_context)
 {
-    //db_t device;
     rtls_set_params_t set_params;
     
     ret_code_t err_code;
@@ -745,7 +729,7 @@ static void power_management_init(void)
 }
 
 /**@brief Инициализация сканирования устройств. 
- * is_conn - true = подкл. к устройствам из whitelist
+ * is_conn - true = подкл. к устройству
  */
 static void scan_init(bool is_conn)
 {
@@ -794,16 +778,6 @@ void bsp_event_handler(bsp_event_t event)
         default:
             break;
     }
-    if (led_state == BSP_INDICATE_IDLE)
-    {
-        led_state = BSP_INDICATE_CONNECTED;
-    }
-    else
-    {
-        led_state = BSP_INDICATE_IDLE;
-    }
-    uint32_t err_code = bsp_indication_set(led_state);
-    APP_ERROR_CHECK(err_code);
 }
 
 static void buttons_leds_init()
@@ -816,7 +790,6 @@ static void buttons_leds_init()
     APP_ERROR_CHECK(err_code);
 
     led_state = BSP_INDICATE_IDLE;
-
 }
 
 
