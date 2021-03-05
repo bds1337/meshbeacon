@@ -104,6 +104,8 @@ static void app_rtls_client_transaction_status_cb(access_model_handle_t model_ha
                                                        void * p_args,
                                                        access_reliable_status_t status);
 
+static void app_rtls_rssi_client_periodic_cb(access_model_handle_t handle, void * p_args);
+
 /*****************************************************************************
  * Static variables
  *****************************************************************************/
@@ -111,7 +113,8 @@ static rtls_rssi_client_t m_rssi_clients[1];
 const rtls_rssi_client_callbacks_t rssi_client_cbs =
 {
     .rtls_status_cb = app_rtls_rssi_client_status_cb,
-    .ack_transaction_status_cb = app_rtls_rssi_client_transaction_status_cb
+    .ack_transaction_status_cb = app_rtls_rssi_client_transaction_status_cb,
+    .periodic_publish_cb = app_rtls_rssi_client_periodic_cb
 };
 
 static rtls_client_t          m_clients[CLIENT_MODEL_INSTANCE_COUNT]; //CLIENT_MODEL_INSTANCE_COUNT
@@ -179,6 +182,11 @@ static void app_rtls_rssi_client_transaction_status_cb(access_model_handle_t mod
             ERROR_CHECK(NRF_ERROR_INTERNAL);
             break;
     }
+}
+
+static void app_rtls_rssi_client_periodic_cb(access_model_handle_t handle, void * p_args)
+{
+    rtls_rssi_client_set_unack(m_rssi_clients, 2);
 }
 
 static void app_rtls_client_status_cb(const rtls_client_t * p_self,
@@ -259,8 +267,9 @@ void mesh_main_send_message(const rtls_set_params_t * msg_params)
     NRF_LOG_INFO("Sending msg: RSSI %d %02x\n", msg_params->rssi.rssi ,  msg_params->rssi.rssi);
 
     (void)access_model_reliable_cancel(m_clients[0].model_handle);
-    status = rtls_client_set(&m_clients[0], msg_params, &transition_params);
-    
+    //status = rtls_client_set(&m_clients[0], msg_params, &transition_params);
+    status = rtls_client_set_unack(&m_clients[0], msg_params, NULL, 2);
+
     switch (status)
     {
         case NRF_SUCCESS:
@@ -332,8 +341,7 @@ void mesh_main_button_event_handler(uint32_t button_number)
         case 1:
         case 2:
             NRF_LOG_INFO("send data - unack");
-            status = rtls_client_set_unack(&m_clients[1], &set_params,
-                                                    NULL, APP_UNACK_MSG_REPEAT_COUNT);
+            status = rtls_client_set_unack(&m_clients[0], &set_params, NULL, 2);
             //hal_led_blink_ms(BSP_LED_3, 200, 2); // TODO: блинк светодиодом донгола
             break;
 
