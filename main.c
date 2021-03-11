@@ -104,36 +104,30 @@ extern bool m_device_provisioned;
 
 //Состояния таймера отпраки данных по мешу
 #define SST_DISCONNECTED                0
-#define SST_PULSE_MEASURE_START         1 
-#define SST_PULSE_MEASURE_STOP          2
-#define SST_PRESSURE_MEASURE_START      3
-#define SST_PRESSURE_MEASURE_STOP       4
-#define SST_IDLE                        5
+#define SST_EVERYTHING_MEASURE_START    1 
+#define SST_EVERYTHING_MEASURE_STOP     2
+#define SST_IDLE                        3
 //Время ожидания таймера (для проведения измерений и отпраки команд старт/стоп)
 #define SST_MEASURE_TIME                60000
 #define SST_SENDCMD_TIME                2000 
-#define SST_IDLE_TIME                   10000
+#define SST_IDLE_TIME                   2000
 // Команды для измерения пульса и давления 
 #define WR4119_CMD_LENGHT               0x0007 //12
-static const uint8_t wr4119_cmd_pulse_start[7]    = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x01 }; 
-static const uint8_t wr4119_cmd_pulse_stop[7]     = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x09, 0x00 };
-static const uint8_t wr4119_cmd_pressure_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x01 };
-static const uint8_t wr4119_cmd_pressure_stop[7]  = { 0xAB, 0x00, 0x04, 0xFF, 0x31, 0x21, 0x00 };
-static const uint8_t wr4119_cmd_recv_type[5]      = { 0xAB, 0x00, 0x05, 0xFF, 0x31 };
+static const uint8_t wr4119_cmd_everything_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x32, 0x80, 0x01 }; // AB-00-04-FF-32-80-01
+static const uint8_t wr4119_cmd_everything_stop[7]  = { 0xAB, 0x00, 0x04, 0xFF, 0x32, 0x80, 0x00 };
+//static const uint8_t wr4119_cmd_recv_type[5]      = { 0xAB, 0x00, 0x05, 0xFF, 0x31 };
+static const uint8_t wr4119_cmd_recv_type[5]      = { 0xAB, 0x00, 0x07, 0xFF, 0x32 }; //  AB-00-07-FF-32-80-00-00-00-00
 
 typedef struct
 {
     struct
     {
-        uint8_t pressure_up;
-        uint8_t pressure_down;
-        bool is_ready;
+        uint8_t up;
+        uint8_t down;
     } pressure;
-    struct
-    {
-        uint8_t pulse;
-        bool is_ready;
-    } pulse;
+    uint8_t pulse;
+    uint8_t saturation;
+    bool is_ready;
 } smartband_data_t;
 
 static smartband_data_t smartband_data;
@@ -147,8 +141,8 @@ static bool is_connected = false;
 static ble_gap_addr_t m_target_periph_addr =
 {
     .addr_type = BLE_GAP_ADDR_TYPE_RANDOM_STATIC,
-//    .addr      = {0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} // reversed from nrf connect
-    .addr      = {0xFA, 0x04, 0xBF, 0x50, 0x7A, 0xE2}
+    .addr      = {0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} // reversed from nrf connect
+//    .addr      = {0xFA, 0x04, 0xBF, 0x50, 0x7A, 0xE2}
 };
 
 /**< Scan parameters requested for scanning and connection. */
@@ -272,22 +266,20 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
             APP_ERROR_CHECK(err_code);
             NRF_LOG_INFO("Connected to device with Nordic UART Service.");
             
-            sst_context = SST_PULSE_MEASURE_START;
+            sst_context = SST_EVERYTHING_MEASURE_START;
             err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_SENDCMD_TIME), NULL);
             APP_ERROR_CHECK(err_code);
             break;
 
         case BLE_NUS_C_EVT_NUS_TX_EVT:
         {
-            healthdata = true;
-            
-            //NRF_LOG_RAW_HEXDUMP_INFO(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
-
             if ( p_ble_nus_evt->data_len < 6 )
                 return;            
 
+            healthdata = true;
             for ( int i = 0; i < 5; i++ )
             {
+                //NRF_LOG_DEBUG("health?: %x", p_ble_nus_evt->p_data[i]);
                 if ( wr4119_cmd_recv_type[i] != p_ble_nus_evt->p_data[i] )
                 {
                     healthdata = false;
@@ -297,19 +289,17 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
             if ( healthdata == true )
             {
                 recived_type = p_ble_nus_evt->p_data[5];
-                if ( recived_type == 0x09 )
+                if ( recived_type == 0x80 )
                 {
-                    smartband_data.pulse.pulse = p_ble_nus_evt->p_data[6];
-                    smartband_data.pulse.is_ready = true;
-                    NRF_LOG_DEBUG("GOT pulse: %x", p_ble_nus_evt->p_data[6]);
-                }
-                if ( recived_type == 0x21 )
-                {
-                    smartband_data.pressure.pressure_up = p_ble_nus_evt->p_data[6];
-                    smartband_data.pressure.pressure_down = p_ble_nus_evt->p_data[7];
-                    smartband_data.pressure.is_ready = true;
-                    NRF_LOG_DEBUG("GOT pressure: %x", p_ble_nus_evt->p_data[6]);
-                    NRF_LOG_DEBUG("GOT pressure: %x", p_ble_nus_evt->p_data[7]);
+                    smartband_data.pulse = p_ble_nus_evt->p_data[6];
+                    smartband_data.saturation = p_ble_nus_evt->p_data[7];
+                    smartband_data.pressure.up = p_ble_nus_evt->p_data[8];
+                    smartband_data.pressure.down = p_ble_nus_evt->p_data[9];
+                    smartband_data.is_ready = true;
+                    NRF_LOG_DEBUG("pulse: %x", p_ble_nus_evt->p_data[6]);
+                    NRF_LOG_DEBUG("saturation: %x", p_ble_nus_evt->p_data[7]);
+                    NRF_LOG_DEBUG("pressure up: %x", p_ble_nus_evt->p_data[8]);
+                    NRF_LOG_DEBUG("pressure down: %x", p_ble_nus_evt->p_data[9]);
                 }
             }
          }  break;
@@ -583,57 +573,42 @@ static void sst_handler(void * p_context)
     }
     switch(sst_context)
     {
-        case SST_PULSE_MEASURE_START:
+        case SST_EVERYTHING_MEASURE_START:
         {
-            sst_context = SST_PULSE_MEASURE_STOP;
-            ble_nus_send(wr4119_cmd_pulse_start, WR4119_CMD_LENGHT);
+            sst_context = SST_EVERYTHING_MEASURE_STOP;
+            ble_nus_send(wr4119_cmd_everything_start, WR4119_CMD_LENGHT);
             err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_MEASURE_TIME), NULL); 
             APP_ERROR_CHECK(err_code);
         } break;
-        case SST_PULSE_MEASURE_STOP:
-        {
-            sst_context = SST_PRESSURE_MEASURE_START;
-            ble_nus_send(wr4119_cmd_pulse_stop, WR4119_CMD_LENGHT);
-            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_SENDCMD_TIME), NULL); 
-            APP_ERROR_CHECK(err_code);
-        } break;
-        case SST_PRESSURE_MEASURE_START:
-        {
-            if ( smartband_data.pulse.is_ready )
-            {
-                // данные пульса уже получены, отправляю в меш
-                set_params.pulse = smartband_data.pulse.pulse;
-                set_params.type = RTLS_PULSE_TYPE;
-                smartband_data.pulse.is_ready = false;
-                NRF_LOG_INFO("SEND pulse      %02x", set_params.pulse);
-                mesh_main_send_message(&set_params);
-            }
-            sst_context = SST_PRESSURE_MEASURE_STOP;
-            ble_nus_send(wr4119_cmd_pressure_start, WR4119_CMD_LENGHT);
-            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_MEASURE_TIME), NULL);
-            APP_ERROR_CHECK(err_code);
-        } break;
-        case SST_PRESSURE_MEASURE_STOP:
+        case SST_EVERYTHING_MEASURE_STOP:
         {
             sst_context = SST_IDLE;
-            ble_nus_send(wr4119_cmd_pressure_stop, WR4119_CMD_LENGHT);
-            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_SENDCMD_TIME), NULL);
+            ble_nus_send(wr4119_cmd_everything_stop, WR4119_CMD_LENGHT);
+            err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_SENDCMD_TIME), NULL); 
             APP_ERROR_CHECK(err_code);
         } break;
         case SST_IDLE:
         {
-            if ( smartband_data.pressure.is_ready )
+            if ( smartband_data.is_ready )
             {
                 // данные получены, отправляю в меш
-                set_params.pressure.pressure_down = smartband_data.pressure.pressure_down;
-                set_params.pressure.pressure_up = smartband_data.pressure.pressure_up;
+                set_params.pressure.pressure_up = smartband_data.pressure.up;
+                set_params.pressure.pressure_down = smartband_data.pressure.down;
                 set_params.type = RTLS_PRESSURE_TYPE;
-                smartband_data.pressure.is_ready = false;
-                NRF_LOG_INFO("SEND pressure d %02x", set_params.pressure.pressure_down);
                 NRF_LOG_INFO("SEND pressure u %02x", set_params.pressure.pressure_up);
+                NRF_LOG_INFO("SEND pressure d %02x", set_params.pressure.pressure_down);
+
                 mesh_main_send_message(&set_params);
+
+                set_params.pulse = smartband_data.pulse;
+                set_params.type = RTLS_PULSE_TYPE;
+                NRF_LOG_INFO("SEND pulse      %02x", set_params.pulse);
+                
+                mesh_main_send_message(&set_params);
+
+                smartband_data.is_ready = false;
             }
-            sst_context = SST_PULSE_MEASURE_START;
+            sst_context = SST_EVERYTHING_MEASURE_START;
             err_code = app_timer_start(m_sst_id, APP_TIMER_TICKS(SST_IDLE_TIME), NULL); 
             APP_ERROR_CHECK(err_code);
         } break;

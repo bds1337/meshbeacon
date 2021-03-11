@@ -264,7 +264,7 @@ void mesh_main_send_message(const rtls_set_params_t * msg_params)
     transition_params.delay_ms = APP_ONOFF_DELAY_MS;
     transition_params.transition_time_ms = APP_ONOFF_TRANSITION_TIME_MS;
 
-    NRF_LOG_INFO("Sending msg: RSSI %d %02x\n", msg_params->rssi.rssi ,  msg_params->rssi.rssi);
+    //NRF_LOG_INFO("Sending msg: RSSI %d %02x\n", msg_params->rssi.rssi ,  msg_params->rssi.rssi);
 
     (void)access_model_reliable_cancel(m_clients[0].model_handle);
     //status = rtls_client_set(&m_clients[0], msg_params, &transition_params);

@@ -65,7 +65,7 @@
  </Watch4>
  <Files>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="629" useTextEdit="1" openedFrom="/home/akeela/WORK/nRF5_SDK_17.0.0_9d13099/components/ble/ble_services/ble_nus_c/ble_nus_c.c" useBinaryEdit="0" left="0" path="../../../main.c" selected="0" top="620" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="81" useTextEdit="1" openedFrom="/home/bes/WORK/nRF5_SDK_17.0.0_9d13099/examples/ble_central/meshbeacon_dongle/main.c" useBinaryEdit="0" left="0" path="../../../mesh_main.c" selected="1" top="79" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="81" useTextEdit="1" openedFrom="/home/bes/WORK/nRF5_SDK_17.0.0_9d13099/examples/ble_central/meshbeacon_dongle/main.c" useBinaryEdit="0" left="0" path="../../../mesh_main.c" selected="0" top="79" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="45" useTextEdit="1" openedFrom="/home/akeela/WORK/mesh420/examples/sdk_coexist/ble_app_uart_coexist/main.c" useBinaryEdit="0" left="0" path="../../../mesh_main.h" selected="0" top="30" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="218" useTextEdit="1" openedFrom="/home/akeela/WORK/nRF5_SDK_17.0.0_9d13099/examples/ble_central/meshbeacon/main.c" useBinaryEdit="0" left="0" path="../../../../../../components/softdevice/s132/headers/ble.h" selected="0" top="205" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="89" useTextEdit="1" openedFrom="/home/akeela/WORK/nRF5_SDK_17.0.0_9d13099/components/ble/ble_services/ble_nus_c/ble_nus_c.c" useBinaryEdit="0" left="0" path="../../../../../../components/softdevice/s132/headers/ble_gap.h" selected="0" top="72" codecName="Default"/>
