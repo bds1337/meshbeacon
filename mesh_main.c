@@ -104,8 +104,6 @@ static void app_rtls_client_transaction_status_cb(access_model_handle_t model_ha
                                                        void * p_args,
                                                        access_reliable_status_t status);
 
-static void app_rtls_rssi_client_periodic_cb(access_model_handle_t handle, void * p_args);
-
 /*****************************************************************************
  * Static variables
  *****************************************************************************/
@@ -113,8 +111,7 @@ static rtls_rssi_client_t m_rssi_clients[1];
 const rtls_rssi_client_callbacks_t rssi_client_cbs =
 {
     .rtls_status_cb = app_rtls_rssi_client_status_cb,
-    .ack_transaction_status_cb = app_rtls_rssi_client_transaction_status_cb,
-    .periodic_publish_cb = app_rtls_rssi_client_periodic_cb
+    .ack_transaction_status_cb = app_rtls_rssi_client_transaction_status_cb
 };
 
 static rtls_client_t          m_clients[CLIENT_MODEL_INSTANCE_COUNT]; //CLIENT_MODEL_INSTANCE_COUNT
@@ -152,7 +149,7 @@ static void provisioning_complete_cb(void)
 static void app_rtls_rssi_client_status_cb(const rtls_rssi_client_t * p_self, 
                                                         const access_message_rx_meta_t * p_meta)
 {
-    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Data was delivered from 0x%x to 0x%x.\n", p_meta->dst.value, p_meta->src.value);
+    __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Data was delivered from 0x%x to 0x%x.\n", p_meta->src.value, p_meta->dst.value);
 }
 
 /* Acknowledged transaction status callback, if acknowledged transfer fails, application can
@@ -182,11 +179,6 @@ static void app_rtls_rssi_client_transaction_status_cb(access_model_handle_t mod
             ERROR_CHECK(NRF_ERROR_INTERNAL);
             break;
     }
-}
-
-static void app_rtls_rssi_client_periodic_cb(access_model_handle_t handle, void * p_args)
-{
-    rtls_rssi_client_set_unack(m_rssi_clients, 2);
 }
 
 static void app_rtls_client_status_cb(const rtls_client_t * p_self,
@@ -254,20 +246,13 @@ static void config_server_evt_cb(const config_server_evt_t * p_evt)
     }
 }
 
+/* Функция отправки параметров о состоянии здороья по меш-сети */
 void mesh_main_send_message(const rtls_set_params_t * msg_params)
 {
     uint32_t status = NRF_SUCCESS;
     static uint8_t tid = 0;
 
-    model_transition_t transition_params;
-
-    transition_params.delay_ms = APP_ONOFF_DELAY_MS;
-    transition_params.transition_time_ms = APP_ONOFF_TRANSITION_TIME_MS;
-
-    //NRF_LOG_INFO("Sending msg: RSSI %d %02x\n", msg_params->rssi.rssi ,  msg_params->rssi.rssi);
-
     (void)access_model_reliable_cancel(m_clients[0].model_handle);
-    //status = rtls_client_set(&m_clients[0], msg_params, &transition_params);
     status = rtls_client_set_unack(&m_clients[0], msg_params, NULL, 2);
 
     switch (status)
@@ -323,6 +308,10 @@ void mesh_main_button_event_handler(uint32_t button_number)
                                             set_params.pressure.pressure_down);
             break;
         case 3:
+            set_params.type = RTLS_SPO2_TYPE;
+            set_params.spo2 = 0xB2;
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: 0x%x|0x%x start.\n", set_params.pressure.pressure_up, 
+                                            set_params.pressure.pressure_down);
             break;
         case 4:
             set_params.type = RTLS_RSSI_TYPE;
@@ -336,24 +325,15 @@ void mesh_main_button_event_handler(uint32_t button_number)
     NRF_LOG_INFO("pulse      %02x", set_params.pulse);
     NRF_LOG_INFO("pressure d %02x", set_params.pressure.pressure_down);
     NRF_LOG_INFO("pressure u %02x", set_params.pressure.pressure_up);
+    NRF_LOG_INFO("spo2       %02x", set_params.spo2);
     switch (button_number)
     {
         case 1:
         case 2:
-            NRF_LOG_INFO("send data - unack");
-            status = rtls_client_set_unack(&m_clients[0], &set_params, NULL, 2);
-            //hal_led_blink_ms(BSP_LED_3, 200, 2); // TODO: блинк светодиодом донгола
-            break;
-
         case 3:
-            rtls_rssi_client_set(&m_rssi_clients[0]);
             break;
         case 4:
-            NRF_LOG_INFO("send data - ack");
             mesh_main_send_message(&set_params);
-            //(void)access_model_reliable_cancel(m_clients[0].model_handle);
-            //status = rtls_client_set(&m_clients[0], &set_params, NULL);
-
             break;
         default:
             break;

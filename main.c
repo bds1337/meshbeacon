@@ -141,8 +141,8 @@ static bool is_connected = false;
 static ble_gap_addr_t m_target_periph_addr =
 {
     .addr_type = BLE_GAP_ADDR_TYPE_RANDOM_STATIC,
-    .addr      = {0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} // reversed from nrf connect
-//    .addr      = {0xFA, 0x04, 0xBF, 0x50, 0x7A, 0xE2}
+//    .addr      = {0x50, 0x87, 0xF8, 0x8F, 0xCC, 0xEF} // reversed from nrf connect
+    .addr      = {0xFA, 0x04, 0xBF, 0x50, 0x7A, 0xE2}
 };
 
 /**< Scan parameters requested for scanning and connection. */
@@ -163,8 +163,6 @@ static ble_gap_scan_params_t m_scan_param =
 
 static bool m_memory_access_in_progress;
 static bsp_indication_t led_state;
-
-
 
 /**@brief Function for assert macro callback.
  *
@@ -603,6 +601,12 @@ static void sst_handler(void * p_context)
                 set_params.pulse = smartband_data.pulse;
                 set_params.type = RTLS_PULSE_TYPE;
                 NRF_LOG_INFO("SEND pulse      %02x", set_params.pulse);
+                
+                mesh_main_send_message(&set_params);
+
+                set_params.spo2 = smartband_data.saturation;
+                set_params.type = RTLS_SPO2_TYPE;
+                NRF_LOG_INFO("SEND spo2       %02x", set_params.spo2);
                 
                 mesh_main_send_message(&set_params);
 

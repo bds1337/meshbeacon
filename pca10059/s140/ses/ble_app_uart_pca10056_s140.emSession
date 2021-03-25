@@ -64,8 +64,8 @@
   <Watches active="0" update="Never"/>
  </Watch4>
  <Files>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="629" useTextEdit="1" openedFrom="/home/akeela/WORK/nRF5_SDK_17.0.0_9d13099/components/ble/ble_services/ble_nus_c/ble_nus_c.c" useBinaryEdit="0" left="0" path="../../../main.c" selected="0" top="620" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="81" useTextEdit="1" openedFrom="/home/bes/WORK/nRF5_SDK_17.0.0_9d13099/examples/ble_central/meshbeacon_dongle/main.c" useBinaryEdit="0" left="0" path="../../../mesh_main.c" selected="0" top="79" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="775" useTextEdit="1" openedFrom="/home/akeela/WORK/nRF5_SDK_17.0.0_9d13099/components/ble/ble_services/ble_nus_c/ble_nus_c.c" useBinaryEdit="0" left="0" path="../../../main.c" selected="1" top="761" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="266" useTextEdit="1" openedFrom="/home/bes/WORK/nRF5_SDK_17.0.0_9d13099/examples/ble_central/meshbeacon_dongle/main.c" useBinaryEdit="0" left="0" path="../../../mesh_main.c" selected="0" top="252" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="45" useTextEdit="1" openedFrom="/home/akeela/WORK/mesh420/examples/sdk_coexist/ble_app_uart_coexist/main.c" useBinaryEdit="0" left="0" path="../../../mesh_main.h" selected="0" top="30" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="218" useTextEdit="1" openedFrom="/home/akeela/WORK/nRF5_SDK_17.0.0_9d13099/examples/ble_central/meshbeacon/main.c" useBinaryEdit="0" left="0" path="../../../../../../components/softdevice/s132/headers/ble.h" selected="0" top="205" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="89" useTextEdit="1" openedFrom="/home/akeela/WORK/nRF5_SDK_17.0.0_9d13099/components/ble/ble_services/ble_nus_c/ble_nus_c.c" useBinaryEdit="0" left="0" path="../../../../../../components/softdevice/s132/headers/ble_gap.h" selected="0" top="72" codecName="Default"/>
@@ -83,7 +83,7 @@
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="72" useTextEdit="1" openedFrom="" useBinaryEdit="0" left="0" path="../../../../../../components/libraries/util/app_error.c" selected="0" top="56" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="441" useTextEdit="1" openedFrom="" useBinaryEdit="0" left="0" path="../../../../../../../mesh420/external/app_timer/app_timer_mesh.c" selected="0" top="413" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="245" useTextEdit="1" openedFrom="/home/bes/WORK/mesh420/models/model_spec/rtls_model/include/rtls_client.h" useBinaryEdit="0" left="0" path="../../../../../../../mesh420/models/model_spec/rtls_model/src/rtls_client.c" selected="0" top="214" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="7643" useTextEdit="1" openedFrom="" useBinaryEdit="0" left="0" path="../config/sdk_config.h" selected="0" top="7615" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="12" y="7708" useTextEdit="1" openedFrom="" useBinaryEdit="0" left="0" path="../config/sdk_config.h" selected="0" top="7695" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="71" useTextEdit="1" openedFrom="/home/bes/WORK/nRF5_SDK_17.0.0_9d13099/examples/ble_central/meshbeacon_dongle/mesh_main.c" useBinaryEdit="0" left="0" path="../../../nrf_mesh_config_app.h" selected="0" top="56" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="430" useTextEdit="1" openedFrom="" useBinaryEdit="0" left="0" path="../../../../../../../mesh420/mesh/core/api/nrf_mesh_config_core.h" selected="0" top="400" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="80" useTextEdit="1" openedFrom="/home/bes/WORK/nRF5_SDK_17.0.0_9d13099/examples/ble_central/meshbeacon_dongle/mesh_main.c" useBinaryEdit="0" left="0" path="../../../../../../../mesh420/models/model_spec/rtls_model/include/rtls_common.h" selected="0" top="61" codecName="Default"/>
@@ -91,5 +91,5 @@
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="48" useTextEdit="1" openedFrom="" useBinaryEdit="0" left="0" path="../../../../../../components/libraries/util/app_error_handler_gcc.c" selected="0" top="33" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="1170" useTextEdit="1" openedFrom="/home/bes/WORK/nRF5_SDK_17.0.0_9d13099/examples/ble_central/meshbeacon_dongle/main.c" useBinaryEdit="0" left="0" path="../../../../../../components/ble/nrf_ble_scan/nrf_ble_scan.c" selected="0" top="1154" codecName="Default"/>
  </Files>
- <ARMCrossStudioWindow activeProject="ble_app_uart_pca10056_s140" fileDialogDefaultFilter="*.c;*.cpp;*.cxx;*.cc;*.h;*.hpp;*.hxx" autoConnectTarget="J-Link" buildConfiguration="Release" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="" debugSearchPath="" autoConnectCapabilities="3199"/>
+ <ARMCrossStudioWindow activeProject="ble_app_uart_pca10056_s140" fileDialogDefaultFilter="*.c;*.cpp;*.cxx;*.cc;*.h;*.hpp;*.hxx" autoConnectTarget="J-Link" buildConfiguration="Release" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="" debugSearchPath="" autoConnectCapabilities="3711"/>
 </session>
