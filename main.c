@@ -590,24 +590,16 @@ static void sst_handler(void * p_context)
             if ( smartband_data.is_ready )
             {
                 // данные получены, отправляю в меш
-                set_params.pressure.pressure_up = smartband_data.pressure.up;
-                set_params.pressure.pressure_down = smartband_data.pressure.down;
-                set_params.type = RTLS_PRESSURE_TYPE;
-                NRF_LOG_INFO("SEND pressure u %02x", set_params.pressure.pressure_up);
-                NRF_LOG_INFO("SEND pressure d %02x", set_params.pressure.pressure_down);
-
-                mesh_main_send_message(&set_params);
-
-                set_params.pulse = smartband_data.pulse;
-                set_params.type = RTLS_PULSE_TYPE;
-                NRF_LOG_INFO("SEND pulse      %02x", set_params.pulse);
+                set_params.smartband.pressure_up = smartband_data.pressure.up;
+                set_params.smartband.pressure_down = smartband_data.pressure.down;
+                NRF_LOG_INFO("SEND pressure u %02x", set_params.smartband.pressure_up);
+                NRF_LOG_INFO("SEND pressure d %02x", set_params.smartband.pressure_down);
+                set_params.smartband.pulse = smartband_data.pulse;
+                NRF_LOG_INFO("SEND pulse      %02x", set_params.smartband.pulse);
+                set_params.smartband.spo2 = smartband_data.saturation;
+                NRF_LOG_INFO("SEND spo2       %02x", set_params.smartband.spo2);
                 
-                mesh_main_send_message(&set_params);
-
-                set_params.spo2 = smartband_data.saturation;
-                set_params.type = RTLS_SPO2_TYPE;
-                NRF_LOG_INFO("SEND spo2       %02x", set_params.spo2);
-                
+                set_params.type = RTLS_ALL_TYPE;
                 mesh_main_send_message(&set_params);
 
                 smartband_data.is_ready = false;
