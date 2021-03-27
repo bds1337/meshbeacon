@@ -68,6 +68,7 @@
 //#include "nrf_mesh_config_examples.h"
 #include "nrf_mesh_config_app.h"
 #include "example_common.h"
+#include "bsp.h"
 //#include "app_db.h"
 
 /*****************************************************************************
@@ -141,8 +142,13 @@ static void unicast_address_print(void)
 static void provisioning_complete_cb(void)
 {
     NRF_LOG_INFO("Successfully provisioned\n");
+    // Blink second LED to signal this device is provisioned
+    uint32_t err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
+    APP_ERROR_CHECK(err_code);
 
     unicast_address_print();
+    /* FIXME: эта функция вызывается когда провиз произошел не полностью. поидеи надо как-то ребутать после провиза */
+    //NVIC_SystemReset();
 }
 
 /* Client model interface: Process the received status message in this callback */
@@ -250,6 +256,7 @@ static void config_server_evt_cb(const config_server_evt_t * p_evt)
 void mesh_main_send_message(const rtls_set_params_t * msg_params)
 {
     uint32_t status = NRF_SUCCESS;
+    uint32_t err_code = NRF_SUCCESS;
     static uint8_t tid = 0;
 
     (void)access_model_reliable_cancel(m_clients[0].model_handle);
@@ -258,12 +265,16 @@ void mesh_main_send_message(const rtls_set_params_t * msg_params)
     switch (status)
     {
         case NRF_SUCCESS:
+            err_code = bsp_indication_set(BSP_INDICATE_SENT_OK);
+            APP_ERROR_CHECK(err_code);
             break;
 
         case NRF_ERROR_NO_MEM:
         case NRF_ERROR_BUSY:
         case NRF_ERROR_INVALID_STATE:
             NRF_LOG_INFO("Client cannot send\n");
+            err_code = bsp_indication_set(BSP_INDICATE_SEND_ERROR);
+            APP_ERROR_CHECK(err_code);
             break;
 
         case NRF_ERROR_INVALID_PARAM:
@@ -289,82 +300,31 @@ void mesh_main_button_event_handler(uint32_t button_number)
     button_number++;
     NRF_LOG_INFO("Button %u pressed\n", button_number);
 
-    //db_t device;
     uint32_t status = NRF_SUCCESS;
     rtls_set_params_t set_params;
 
     switch(button_number)
     {
         case 1:
-            set_params.type = RTLS_PULSE_TYPE;
-            set_params.pulse = 0xFB;
-            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: 0x%x start.\n", set_params.pulse);
-            break;
-        case 2:
-            set_params.type = RTLS_PRESSURE_TYPE;
-            set_params.pressure.pressure_up = 0xB2;
-            set_params.pressure.pressure_down = 0x2B;
-            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: 0x%x|0x%x start.\n", set_params.pressure.pressure_up, 
-                                            set_params.pressure.pressure_down);
-            break;
-        case 3:
-            set_params.type = RTLS_SPO2_TYPE;
-            set_params.spo2 = 0xB2;
-            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: 0x%x|0x%x start.\n", set_params.pressure.pressure_up, 
-                                            set_params.pressure.pressure_down);
-            break;
-        case 4:
-            set_params.type = RTLS_RSSI_TYPE;
-            set_params.rssi.rssi = 0xAA;
-            set_params.rssi.tag_id = 0xBDBD;
-            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data: rssi = 0x%x addr = 0x%x start.\n", set_params.rssi.rssi,
-                                            set_params.rssi.tag_id);
-            break;
-    }
-
-    NRF_LOG_INFO("pulse      %02x", set_params.pulse);
-    NRF_LOG_INFO("pressure d %02x", set_params.pressure.pressure_down);
-    NRF_LOG_INFO("pressure u %02x", set_params.pressure.pressure_up);
-    NRF_LOG_INFO("spo2       %02x", set_params.spo2);
-    switch (button_number)
-    {
-        case 1:
         case 2:
         case 3:
+            if (mesh_stack_is_device_provisioned())
+            {
+                #if MESH_FEATURE_GATT_PROXY_ENABLED
+                (void) proxy_stop();
+                #endif
+                mesh_stack_config_clear();
+                node_reset();
+            }
             break;
         case 4:
+            set_params.smartband.pressure_up = 0xDE;
+            set_params.smartband.pressure_down = 0xAD;
+            set_params.smartband.pulse = 0xBE;
+            set_params.smartband.spo2 = 0xEF;
+            set_params.type = RTLS_ALL_TYPE;
+            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Transfering data...\n");
             mesh_main_send_message(&set_params);
-            break;
-        default:
-            break;
-    }
-
-    switch (status)
-    {
-        case NRF_SUCCESS:
-            break;
-
-        case NRF_ERROR_NO_MEM:
-        case NRF_ERROR_BUSY:
-        case NRF_ERROR_INVALID_STATE:
-            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Client %u cannot send\n", button_number);
-            // TODO: светодиод для донгла
-            //hal_led_blink_ms(LEDS_MASK, LED_BLINK_SHORT_INTERVAL_MS, LED_BLINK_CNT_NO_REPLY);
-            break;
-
-        case NRF_ERROR_INVALID_PARAM:
-            /* Publication not enabled for this client. One (or more) of the following is wrong:
-             * - An application key is missing, or there is no application key bound to the model
-             * - The client does not have its publication state set
-             *
-             * It is the provisioner that adds an application key, binds it to the model and sets
-             * the model's publication state.
-             */
-            __LOG(LOG_SRC_APP, LOG_LEVEL_INFO, "Publication not configured for client %u\n", button_number);
-            break;
-
-        default:
-            ERROR_CHECK(status);
             break;
     }
 }

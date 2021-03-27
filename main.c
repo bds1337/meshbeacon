@@ -162,7 +162,6 @@ static ble_gap_scan_params_t m_scan_param =
 };
 
 static bool m_memory_access_in_progress;
-static bsp_indication_t led_state;
 
 /**@brief Function for assert macro callback.
  *
@@ -198,12 +197,19 @@ static void scan_start(void)
     if (!m_device_provisioned)
     {
         NRF_LOG_INFO("Device not provisioned.");
+        // Ready for privison
+        uint32_t err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING_DIRECTED);
+        APP_ERROR_CHECK(err_code);
         return;
     }
 
     err_code = nrf_ble_scan_start(&m_scan);
     APP_ERROR_CHECK(err_code);
+
     NRF_LOG_INFO("Scan start");
+    // Start scanning
+    err_code = bsp_indication_set(BSP_INDICATE_SCANNING);
+    APP_ERROR_CHECK(err_code);
 }
 
 /**@brief Команда отправки сообщения через сервич Nordic UART (NUS)
@@ -428,8 +434,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             NRF_LOG_INFO("LBS central link 0x%x disconnected (reason: 0x%x)",
                          p_gap_evt->conn_handle,
                          p_gap_evt->params.disconnected.reason);
-            err_code = bsp_indication_set(BSP_INDICATE_IDLE);
-            APP_ERROR_CHECK(err_code);
+
             is_connected = false;
         } break;
 
@@ -592,12 +597,12 @@ static void sst_handler(void * p_context)
                 // данные получены, отправляю в меш
                 set_params.smartband.pressure_up = smartband_data.pressure.up;
                 set_params.smartband.pressure_down = smartband_data.pressure.down;
-                NRF_LOG_INFO("SEND pressure u %02x", set_params.smartband.pressure_up);
-                NRF_LOG_INFO("SEND pressure d %02x", set_params.smartband.pressure_down);
                 set_params.smartband.pulse = smartband_data.pulse;
-                NRF_LOG_INFO("SEND pulse      %02x", set_params.smartband.pulse);
                 set_params.smartband.spo2 = smartband_data.saturation;
-                NRF_LOG_INFO("SEND spo2       %02x", set_params.smartband.spo2);
+
+                NRF_LOG_INFO("SEND pressure %02x/%02x, pulse %02x spo %02x", set_params.smartband.pressure_up, 
+                              set_params.smartband.pressure_down, set_params.smartband.pulse, 
+                              set_params.smartband.spo2);
                 
                 set_params.type = RTLS_ALL_TYPE;
                 mesh_main_send_message(&set_params);
@@ -760,7 +765,6 @@ static void buttons_leds_init()
     err_code = bsp_btn_ble_init(NULL, &startup_event);
     APP_ERROR_CHECK(err_code);
 
-    led_state = BSP_INDICATE_IDLE;
 }
 
 
