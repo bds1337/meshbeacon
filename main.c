@@ -49,7 +49,7 @@
  */
 
 /*
- * для прошивки донгла используй BOARD_PCA10059 вместо BOARD_PCA1005
+ * для прошивки донгла используй BOARD_PCA10059 вместо BOARD_PCA10056
  */
 
 #include <stdint.h>
@@ -59,13 +59,14 @@
 #include "ble_hci.h"
 #include "ble_advertising.h"
 #include "ble_conn_params.h"
-#include "ble_db_discovery.h" //added
+#include "ble_db_discovery.h"
 #include "nrf_sdh.h"
 #include "nrf_sdh_soc.h"
 #include "nrf_sdh_ble.h"
 #include "nrf_ble_gatt.h"
 #include "nrf_ble_qwr.h"
-#include "nrf_ble_scan.h" // added 
+#include "nrf_ble_scan.h"
+#include "nrf_drv_gpiote.h"
 #include "app_timer.h"
 #include "ble_nus_c.h"
 #include "app_util_platform.h"
@@ -90,17 +91,7 @@
 #define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000)                      /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
 #define MAX_CONN_PARAMS_UPDATE_COUNT    3                                           /**< Number of attempts before giving up the connection parameter negotiation. */
 
-
-BLE_NUS_C_DEF(m_ble_nus_c);                                             /**< BLE Nordic UART Service (NUS) client instance. */
-BLE_DB_DISCOVERY_DEF(m_db_disc);                                        /**< Database discovery module instance. */
-NRF_BLE_GATT_DEF(m_gatt);                                               /**< GATT module instance. */
-NRF_BLE_SCAN_DEF(m_scan);                                       /**< Scanning module instance. */
-NRF_BLE_GQ_DEF(m_ble_gatt_queue,                                        /**< BLE GATT Queue instance. */
-               NRF_SDH_BLE_CENTRAL_LINK_COUNT,
-               NRF_BLE_GQ_QUEUE_SIZE);
-APP_TIMER_DEF(m_sst_id); // таймер между командами измерения давления и пульса
-
-extern bool m_device_provisioned;
+#define PIN_OUT NRF_GPIO_PIN_MAP(1,10)
 
 //Состояния таймера отпраки данных по мешу
 #define SST_DISCONNECTED                0
@@ -113,6 +104,18 @@ extern bool m_device_provisioned;
 #define SST_IDLE_TIME                   2000
 // Команды для измерения пульса и давления 
 #define WR4119_CMD_LENGHT               0x0007 //12
+
+BLE_NUS_C_DEF(m_ble_nus_c);                                             /**< BLE Nordic UART Service (NUS) client instance. */
+BLE_DB_DISCOVERY_DEF(m_db_disc);                                        /**< Database discovery module instance. */
+NRF_BLE_GATT_DEF(m_gatt);                                               /**< GATT module instance. */
+NRF_BLE_SCAN_DEF(m_scan);                                       /**< Scanning module instance. */
+NRF_BLE_GQ_DEF(m_ble_gatt_queue,                                        /**< BLE GATT Queue instance. */
+               NRF_SDH_BLE_CENTRAL_LINK_COUNT,
+               NRF_BLE_GQ_QUEUE_SIZE);
+APP_TIMER_DEF(m_sst_id); // таймер между командами измерения давления и пульса
+
+extern bool m_device_provisioned;
+
 static const uint8_t wr4119_cmd_everything_start[7] = { 0xAB, 0x00, 0x04, 0xFF, 0x32, 0x80, 0x01 }; // AB-00-04-FF-32-80-01
 static const uint8_t wr4119_cmd_everything_stop[7]  = { 0xAB, 0x00, 0x04, 0xFF, 0x32, 0x80, 0x00 };
 //static const uint8_t wr4119_cmd_recv_type[5]      = { 0xAB, 0x00, 0x05, 0xFF, 0x31 };
@@ -153,7 +156,7 @@ static ble_gap_scan_params_t m_scan_param =
     .interval_us   = NRF_BLE_SCAN_SCAN_INTERVAL * UNIT_0_625_MS,
     .window_us     = NRF_BLE_SCAN_SCAN_WINDOW * UNIT_0_625_MS,
 #else
-    .interval      = NRF_BLE_SCAN_SCAN_INTERVAL,
+    .interval      = 320, // NRF_BLE_SCAN_SCAN_INTERVAL = 180;  * 2 = 320
     .window        = NRF_BLE_SCAN_SCAN_WINDOW,
 #endif
         .filter_policy = BLE_GAP_SCAN_FP_ACCEPT_ALL, //BLE_GAP_SCAN_FP_WHITELIST BLE_GAP_SCAN_FP_ACCEPT_ALL
@@ -768,6 +771,36 @@ static void buttons_leds_init()
 }
 
 
+void in_pin_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
+{
+    //nrf_drv_gpiote_out_toggle(PIN_OUT);
+}
+/**
+ * @brief Function for configuring: PIN_IN pin for input, PIN_OUT pin for output,
+ * and configures GPIOTE to give an interrupt on pin change.
+ */
+static void gpio_init(void)
+{
+    ret_code_t err_code;
+    err_code = nrf_drv_gpiote_init();
+    NRF_LOG_INFO("err: %u\n", err_code);
+    APP_ERROR_CHECK(err_code);  // here err_code = NRFX_ERROR_INVALID_STATE
+
+    nrf_drv_gpiote_out_config_t out_config = GPIOTE_CONFIG_OUT_SIMPLE(false);
+
+    err_code = nrf_drv_gpiote_out_init(PIN_OUT, &out_config);
+    APP_ERROR_CHECK(err_code);
+
+    //nrf_drv_gpiote_in_config_t in_config = GPIOTE_CONFIG_IN_SENSE_TOGGLE(true);
+    //in_config.pull = NRF_GPIO_PIN_PULLUP;
+
+    //err_code = nrf_drv_gpiote_in_init(PIN_IN, &in_config, in_pin_handler);
+    //APP_ERROR_CHECK(err_code);
+
+    //nrf_drv_gpiote_in_event_enable(PIN_IN, true);
+}
+
+
 /**@brief Application main function.
  */
 int main(void)
@@ -775,6 +808,7 @@ int main(void)
     // Initialize.
     log_init();
     timers_init();
+    gpio_init(); // falling program here
     buttons_leds_init();
     db_discovery_init();
     power_management_init();

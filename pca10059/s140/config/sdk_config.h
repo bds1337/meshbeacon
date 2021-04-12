@@ -48,7 +48,7 @@
 #endif
 // <h> Board Support
 
-// shit
+// shitf
 // <e> NRF_BLE_GQ_ENABLED - nrf_ble_gq - BLE GATT Queue Module
 //==========================================================
 #ifndef NRF_BLE_GQ_ENABLED
@@ -6044,7 +6044,7 @@
 
 // </h>
 //==========================================================
-
+ 
 // <h> nRF_Libraries
 
 //==========================================================
@@ -6059,7 +6059,7 @@
 
 
 #ifndef APP_GPIOTE_ENABLED
-#define APP_GPIOTE_ENABLED 0
+#define APP_GPIOTE_ENABLED 1
 #endif
 
 // <q> APP_PWM_ENABLED  - app_pwm - PWM functionality
